@@ -118,11 +118,20 @@ public class SendModeFragment extends Fragment {
 
     /** Called when upload completes successfully. */
     public void onUploadSuccess() {
-        if (progressBar == null) return;
-        progressBar.setProgress(100);
-        tvStatus.setText(R.string.upload_success);
-        // Navigate back to drive — FileListFragment Firestore listener updates automatically
-        requireActivity().getSupportFragmentManager().popBackStack();
+        // Update UI safely (views may occasionally be null during transitions)
+        if (progressBar != null) progressBar.setProgress(100);
+        if (tvStatus != null) {
+            tvStatus.setVisibility(View.VISIBLE);
+            tvStatus.setText(R.string.upload_success);
+        }
+        // Post navigation so user briefly sees "Upload complete!" and so the
+        // FragmentManager has no pending transactions when popBackStack() fires.
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            androidx.fragment.app.FragmentActivity activity = getActivity();
+            if (activity != null && !activity.isFinishing() && isAdded()) {
+                activity.getSupportFragmentManager().popBackStack();
+            }
+        }, 800);
     }
 
     /** Called when upload fails. */
