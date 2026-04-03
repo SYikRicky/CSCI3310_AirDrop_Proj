@@ -53,8 +53,8 @@ import java.util.concurrent.Executors;
 public class MapActivity extends AppCompatActivity {
 
     private static final String TAG = "MapActivity";
-    private static final double ZOOM_MY_LOCATION = 18.0;
-    private static final double ZOOM_SHARED_LOCATION = 17.5;
+    private static final double ZOOM_MY_LOCATION = 19.0;
+    private static final double ZOOM_SHARED_LOCATION = 19.5;
 
     public static final String EXTRA_LAT = "lat";
     public static final String EXTRA_LNG = "lng";
@@ -98,7 +98,7 @@ public class MapActivity extends AppCompatActivity {
         mapView.setMultiTouchControls(true);
 
         IMapController controller = mapView.getController();
-        controller.setZoom(16.0);
+        controller.setZoom(ZOOM_SHARED_LOCATION);
 
         myLocationOverlay = new MyLocationNewOverlay(
                 new GpsMyLocationProvider(this), mapView);

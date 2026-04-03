@@ -1,6 +1,7 @@
 package com.example.csci3310_airdrop_proj;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -33,6 +34,7 @@ import com.example.csci3310_airdrop_proj.ui.fragment.ChatDeviceListFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.ChatRoomFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.DeviceDiscoveryFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.ReceiveModeFragment;
+import com.example.csci3310_airdrop_proj.ui.MapActivity;
 import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -177,6 +179,9 @@ public class MainActivity extends AppCompatActivity
             } else if (id == R.id.nav_chat) {
                 showChatMode();
                 return true;
+            } else if (id == R.id.nav_map) {
+                openMap();
+                return true;
             }
             return false;
         });
@@ -205,6 +210,14 @@ public class MainActivity extends AppCompatActivity
                 .beginTransaction()
                 .replace(R.id.fragment_container, fragment, tag)
                 .commit();
+    }
+
+    // ── Map ───────────────────────────────────────────────────────────────────
+
+    private void openMap() {
+        nearbyManager.setChatMode(false);
+        nearbyManager.stopDiscovery();
+        startActivity(new Intent(this, MapActivity.class));
     }
 
     // ── Send flow (called by SendModeFragment) ────────────────────────────────
