@@ -11,6 +11,9 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.example.csci3310_airdrop_proj.R;
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -50,6 +53,8 @@ import java.util.concurrent.Executors;
 public class MapActivity extends AppCompatActivity {
 
     private static final String TAG = "MapActivity";
+    private static final double ZOOM_MY_LOCATION = 18.0;
+    private static final double ZOOM_SHARED_LOCATION = 17.5;
 
     public static final String EXTRA_LAT = "lat";
     public static final String EXTRA_LNG = "lng";
@@ -65,6 +70,8 @@ public class MapActivity extends AppCompatActivity {
     private Marker myMarker;
     private boolean routeVisible = false;
     private MaterialButton btnToggleRoute;
+    private MaterialButton btnWhereAmI;
+    private MaterialButton btnBackToLocation;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -77,6 +84,14 @@ public class MapActivity extends AppCompatActivity {
                 new java.io.File(getExternalFilesDir(null), "osmdroid/tiles"));
 
         setContentView(R.layout.activity_map);
+
+        View root = findViewById(R.id.map_root);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(v.getPaddingLeft(), bars.top, v.getPaddingRight(), bars.bottom);
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(root);
 
         mapView = findViewById(R.id.map_view);
         mapView.setTileSource(TileSourceFactory.MAPNIK);
@@ -97,9 +112,14 @@ public class MapActivity extends AppCompatActivity {
         String label = getIntent().getStringExtra(EXTRA_LABEL);
 
         btnToggleRoute = findViewById(R.id.btn_toggle_route);
+        btnWhereAmI = findViewById(R.id.btn_where_am_i);
+        btnBackToLocation = findViewById(R.id.btn_back_to_location);
+
+        btnWhereAmI.setOnClickListener(v -> goToMyLocationAndZoom());
 
         if (!Double.isNaN(lat) && !Double.isNaN(lng)) {
             targetPoint = new GeoPoint(lat, lng);
+            controller.setZoom(ZOOM_SHARED_LOCATION);
             controller.setCenter(targetPoint);
 
             Marker marker = new Marker(mapView);
@@ -110,15 +130,14 @@ public class MapActivity extends AppCompatActivity {
 
             btnToggleRoute.setVisibility(View.VISIBLE);
             btnToggleRoute.setOnClickListener(v -> toggleRoute());
+            btnBackToLocation.setVisibility(View.VISIBLE);
+            btnBackToLocation.setOnClickListener(v -> goToSharedLocationAndZoom());
         } else {
-            centreOnMyLocation();
+            goToMyLocationAndZoom();
         }
 
         ImageButton btnBack = findViewById(R.id.btn_back);
         btnBack.setOnClickListener(v -> finish());
-
-        ImageButton btnMyLocation = findViewById(R.id.btn_my_location);
-        btnMyLocation.setOnClickListener(v -> centreOnMyLocation());
     }
 
     private void toggleRoute() {
@@ -271,7 +290,7 @@ public class MapActivity extends AppCompatActivity {
     }
 
     @SuppressWarnings("MissingPermission")
-    private void centreOnMyLocation() {
+    private void goToMyLocationAndZoom() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, R.string.location_permission_needed, Toast.LENGTH_SHORT).show();
@@ -283,12 +302,21 @@ public class MapActivity extends AppCompatActivity {
                     if (location != null) {
                         GeoPoint myPoint = new GeoPoint(
                                 location.getLatitude(), location.getLongitude());
-                        mapView.getController().animateTo(myPoint);
+                        IMapController c = mapView.getController();
+                        c.setZoom(ZOOM_MY_LOCATION);
+                        c.animateTo(myPoint);
                     } else {
                         Toast.makeText(this, R.string.location_unavailable,
                                 Toast.LENGTH_SHORT).show();
                     }
                 });
+    }
+
+    private void goToSharedLocationAndZoom() {
+        if (targetPoint == null) return;
+        IMapController c = mapView.getController();
+        c.setZoom(ZOOM_SHARED_LOCATION);
+        c.animateTo(targetPoint);
     }
 
     @Override

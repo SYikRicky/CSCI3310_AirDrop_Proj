@@ -66,6 +66,8 @@
     <string name="map_hide_route">Hide Route</string>
     <string name="map_route_failed">Could not load walking route, showing straight line</string>
     <string name="map_fetching_route">Loading walking route…</string>
+    <string name="map_where_am_i">Where am I</string>
+    <string name="map_back_to_location">Back to Location</string>
 
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>

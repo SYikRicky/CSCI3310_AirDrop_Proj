@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/map_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- Toolbar -->
+    <!-- Top bar: back + title only (inset padding applied in code for status bar) -->
     <LinearLayout
+        android:id="@+id/map_top_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:padding="12dp"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="12dp"
         android:background="?colorSurface"
         android:elevation="4dp">
 
@@ -32,23 +36,6 @@
             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
             android:layout_marginStart="12dp" />
 
-        <ImageButton
-            android:id="@+id/btn_my_location"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/ic_menu_mylocation"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/map_my_location" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_toggle_route"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="@string/map_show_route"
-            android:textSize="12sp"
-            android:visibility="gone" />
-
     </LinearLayout>
 
     <!-- OSMDroid MapView -->
@@ -57,5 +44,60 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
+
+    <!-- Bottom controls: clear of status bar; inset adds nav-bar padding on root -->
+    <LinearLayout
+        android:id="@+id/map_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="8dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:background="?colorSurface"
+        android:elevation="8dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_toggle_route"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:text="@string/map_show_route"
+            android:textSize="11sp"
+            android:maxLines="2"
+            android:visibility="gone"
+            app:cornerRadius="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_where_am_i"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:minHeight="48dp"
+            android:text="@string/map_where_am_i"
+            android:textSize="11sp"
+            android:maxLines="2"
+            app:cornerRadius="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_back_to_location"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:minHeight="48dp"
+            android:text="@string/map_back_to_location"
+            android:textSize="11sp"
+            android:maxLines="2"
+            android:visibility="gone"
+            app:cornerRadius="8dp" />
+
+    </LinearLayout>
 
 </LinearLayout>
