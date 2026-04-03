@@ -192,6 +192,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Called by FileListFragment when user taps a file card.
+     * Fires an implicit ACTION_VIEW Intent so the OS picks the right app
+     * (Gallery for images, PDF viewer for PDFs, browser for everything else).
+     * Demonstrates implicit Intents — no target app is hard-coded.
+     */
+    public void previewFile(SharedFile file) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(
+                android.net.Uri.parse(file.getDownloadUrl()),
+                file.getMimeType() != null ? file.getMimeType() : "*/*");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No app found to open this file type", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
      * Called by FileListFragment when user taps the download button on a file.
      * Starts FileTransferService — keeps the download alive even if app is backgrounded.
      */

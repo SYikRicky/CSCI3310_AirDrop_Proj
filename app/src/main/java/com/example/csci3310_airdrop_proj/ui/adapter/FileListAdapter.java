@@ -28,6 +28,7 @@ import java.util.Locale;
 public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.FileViewHolder> {
 
     public interface OnFileActionListener {
+        void onPreviewClicked(SharedFile file);
         void onDownloadClicked(SharedFile file);
         void onDeleteClicked(SharedFile file);
     }
@@ -90,6 +91,10 @@ public class FileListAdapter extends RecyclerView.Adapter<FileListAdapter.FileVi
                     : "uploading…";
             tvMeta.setText(file.getFileSizeFormatted() + "  ·  " + file.getUploadedBy() + "  ·  " + date);
 
+            // Tap the card itself to preview the file
+            itemView.setOnClickListener(v -> {
+                if (listener != null) listener.onPreviewClicked(file);
+            });
             btnDownload.setOnClickListener(v -> {
                 if (listener != null) listener.onDownloadClicked(file);
             });

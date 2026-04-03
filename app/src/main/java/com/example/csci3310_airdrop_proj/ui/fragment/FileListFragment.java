@@ -63,6 +63,11 @@ public class FileListFragment extends Fragment {
         adapter = new FileListAdapter();
         adapter.setOnFileActionListener(new FileListAdapter.OnFileActionListener() {
             @Override
+            public void onPreviewClicked(SharedFile file) {
+                ((MainActivity) requireActivity()).previewFile(file);
+            }
+
+            @Override
             public void onDownloadClicked(SharedFile file) {
                 ((MainActivity) requireActivity()).downloadFile(file);
             }
