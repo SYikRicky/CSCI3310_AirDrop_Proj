@@ -159,15 +159,22 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onSuccess(SharedFile file) {
                         runOnUiThread(() -> {
+                            android.util.Log.d("MainActivity", "onSuccess callback reached");
                             Toast.makeText(MainActivity.this,
                                     "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
                             sendModeFragment = null;
-                            // Navigate directly to FileListFragment — popBackStack was unreliable
-                            getSupportFragmentManager()
-                                    .beginTransaction()
-                                    .replace(R.id.fragment_container,
-                                            new FileListFragment(), FileListFragment.TAG)
-                                    .commit();
+                            try {
+                                getSupportFragmentManager()
+                                        .beginTransaction()
+                                        .replace(R.id.fragment_container,
+                                                new FileListFragment(), FileListFragment.TAG)
+                                        .commitAllowingStateLoss();
+                                android.util.Log.d("MainActivity", "Fragment transaction committed");
+                            } catch (Exception e) {
+                                android.util.Log.e("MainActivity", "Navigation failed", e);
+                                Toast.makeText(MainActivity.this,
+                                        "Nav error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            }
                         });
                     }
 

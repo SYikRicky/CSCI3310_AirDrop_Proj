@@ -97,10 +97,12 @@ public class SharedDriveRepository {
             callback.onProgress(pct);
         });
 
-        uploadTask.addOnSuccessListener(snapshot ->
+        uploadTask.addOnSuccessListener(snapshot -> {
+            Log.d(TAG, "Step 1 DONE: Storage upload complete");
             // Step 2: get the public download URL from Storage
             ref.getDownloadUrl().addOnSuccessListener(downloadUri -> {
                 String url = downloadUri.toString();
+                Log.d(TAG, "Step 2 DONE: Got download URL = " + url);
 
                 // Step 3: write metadata to Firestore
                 Map<String, Object> doc = new HashMap<>();
@@ -115,21 +117,21 @@ public class SharedDriveRepository {
                 db.collection(COLLECTION)
                         .add(doc)
                         .addOnSuccessListener(docRef -> {
+                            Log.d(TAG, "Step 3 DONE: Firestore write → " + docRef.getId());
                             SharedFile file = new SharedFile(fileName, mimeType, fileSize,
                                     Build.MODEL, url, storagePath);
-                            Log.d(TAG, "Uploaded: " + fileName + " → " + docRef.getId());
                             callback.onSuccess(file);
                         })
                         .addOnFailureListener(e -> {
-                            Log.e(TAG, "Firestore write failed", e);
+                            Log.e(TAG, "Step 3 FAILED: Firestore write", e);
                             callback.onFailure(e);
                         });
 
             }).addOnFailureListener(e -> {
-                Log.e(TAG, "getDownloadUrl failed", e);
+                Log.e(TAG, "Step 2 FAILED: getDownloadUrl", e);
                 callback.onFailure(e);
-            })
-        );
+            });
+        });
 
         uploadTask.addOnFailureListener(e -> {
             Log.e(TAG, "Storage upload failed", e);
