@@ -54,7 +54,13 @@ public class ChatHistoryManager {
                 String text       = obj.getString("text");
                 long   timestamp  = obj.getLong("timestamp");
                 boolean outgoing  = obj.getBoolean("outgoing");
-                messages.add(new ChatMessage(type, senderName, text, timestamp, outgoing));
+                if (type == ChatMessage.Type.LOCATION) {
+                    double lat = obj.optDouble("latitude", 0);
+                    double lng = obj.optDouble("longitude", 0);
+                    messages.add(ChatMessage.createLocation(senderName, lat, lng, timestamp, outgoing));
+                } else {
+                    messages.add(new ChatMessage(type, senderName, text, timestamp, outgoing));
+                }
             }
         } catch (Exception ignored) { /* corrupted prefs — return partial */ }
         return messages;
@@ -78,6 +84,10 @@ public class ChatHistoryManager {
                 obj.put("text",       msg.getText());
                 obj.put("timestamp",  msg.getTimestamp());
                 obj.put("outgoing",   msg.isOutgoing());
+                if (msg.getType() == ChatMessage.Type.LOCATION) {
+                    obj.put("latitude",  msg.getLatitude());
+                    obj.put("longitude", msg.getLongitude());
+                }
                 arr.put(obj);
             }
             prefs.edit().putString("history_" + peerDeviceName, arr.toString()).apply();
