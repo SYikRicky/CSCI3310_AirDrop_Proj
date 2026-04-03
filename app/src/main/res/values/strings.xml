@@ -22,6 +22,34 @@
     <string name="transfer_complete">Transfer complete</string>
     <string name="transfer_failed">Transfer failed</string>
 
+    <!-- Chat -->
+    <string name="tab_chat">Chat</string>
+    <string name="chat_nearby_devices">Nearby Devices</string>
+    <string name="chat_searching">Tap a device to start chatting</string>
+    <string name="chat_no_devices">Searching for nearby devices…</string>
+    <string name="chat_hint">Type a message</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_attach_file">Attach file</string>
+    <string name="chat_connecting">Connecting…</string>
+    <string name="chat_connected">Connected</string>
+    <string name="chat_disconnected">Disconnected</string>
+
+    <!-- Chat invitation dialog -->
+    <string name="chat_invitation_title">Chat Invitation</string>
+    <string name="chat_invitation_message">%1$s wants to chat with you</string>
+    <string name="chat_invitation_accept">Accept</string>
+    <string name="chat_invitation_decline">Decline</string>
+
+    <!-- Chat history section -->
+    <string name="chat_recent_conversations">Recent Conversations</string>
+    <string name="reconnect">Connect</string>
+    <string name="chat_your_name">Your name: %1$s</string>
+
+    <!-- Post-receive file actions -->
+    <string name="btn_open_file">Open File</string>
+    <string name="btn_open_downloads">Downloads</string>
+    <string name="no_app_for_file">No app found to open this file</string>
+
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
 </resources>

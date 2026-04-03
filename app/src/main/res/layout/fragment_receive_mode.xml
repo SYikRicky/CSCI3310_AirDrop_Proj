@@ -51,4 +51,29 @@
         android:text="@string/start_receiving"
         android:minWidth="200dp" />
 
+    <!-- Action buttons shown after a file is received (initially hidden) -->
+    <LinearLayout
+        android:id="@+id/layout_file_actions"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="24dp"
+        android:visibility="gone">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_file"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_open_file"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_downloads"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:text="@string/btn_open_downloads" />
+
+    </LinearLayout>
+
 </LinearLayout>

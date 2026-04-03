@@ -49,6 +49,9 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission
         android:name="android.permission.READ_MEDIA_IMAGES"
         tools:targetApi="33" />
     <uses-permission
@@ -101,6 +104,17 @@
             android:name=".service.FileTransferService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- FileProvider for sharing saved files with viewer apps (API 24+) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.example.csci3310_airdrop_proj.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

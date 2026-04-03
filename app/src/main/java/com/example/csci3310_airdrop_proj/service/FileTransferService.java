@@ -5,7 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
@@ -41,9 +44,21 @@ public class FileTransferService extends LifecycleService {
     public static final String EXTRA_FILE_METADATA   = "extra_file_metadata";
     public static final String EXTRA_TEMP_FILE_PATH  = "extra_temp_file_path";
 
+    /** Callback notified on the main thread when a file has been saved successfully. */
+    public interface OnFileSavedCallback {
+        void onFileSaved(Uri savedUri, String fileName, String mimeType);
+    }
+
+    private static OnFileSavedCallback sCallback;
+
+    public static void setCallback(OnFileSavedCallback callback) {
+        sCallback = callback;
+    }
+
     private ExecutorService     executor;
     private FileStorageManager  storageManager;
     private NotificationManager notifManager;
+    private final Handler       mainHandler = new Handler(Looper.getMainLooper());
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -108,9 +123,16 @@ public class FileTransferService extends LifecycleService {
             updateNotification("Saving: " + finalMeta.getFileName() + "…");
 
             try (FileInputStream fis = new FileInputStream(tempFile)) {
-                storageManager.saveFile(finalMeta.getFileName(), finalMeta.getMimeType(), fis);
+                Uri savedUri = storageManager.saveFile(finalMeta.getFileName(), finalMeta.getMimeType(), fis);
                 Log.d(TAG, "Saved: " + finalMeta.getFileName());
                 updateNotification("Saved: " + finalMeta.getFileName());
+                if (sCallback != null) {
+                    String mime = finalMeta.getMimeType();
+                    String name = finalMeta.getFileName();
+                    mainHandler.post(() -> {
+                        if (sCallback != null) sCallback.onFileSaved(savedUri, name, mime);
+                    });
+                }
             } catch (IOException e) {
                 Log.e(TAG, "Save failed", e);
                 updateNotification("Save failed: " + e.getMessage());

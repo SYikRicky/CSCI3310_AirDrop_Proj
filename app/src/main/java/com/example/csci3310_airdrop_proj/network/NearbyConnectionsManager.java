@@ -32,8 +32,10 @@ import com.google.android.gms.nearby.connection.Strategy;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Manages all Google Nearby Connections API operations:
@@ -58,6 +60,16 @@ public class NearbyConnectionsManager {
     // Listener callbacks (set by MainActivity)
     private TransferEventBus.ConnectionListener connectionListener;
     private TransferEventBus.TransferListener transferListener;
+    private TransferEventBus.ChatListener chatListener;
+
+    // ── Local device identity ─────────────────────────────────────────────────
+    private String localDeviceName = Build.MODEL;
+
+    // ── Chat-mode invitation tracking ─────────────────────────────────────────
+    /** True when the Chat tab is active — incoming connections show invitation dialog. */
+    private boolean chatModeActive = false;
+    /** Endpoint IDs for connections that WE initiated (auto-accept on both sides). */
+    private final Set<String> outgoingConnectionRequests = new HashSet<>();
 
     // ── Discovery state ──────────────────────────────────────────────────────
     private final Map<String, DeviceInfo> discoveredDevices = new HashMap<>();
@@ -84,13 +96,20 @@ public class NearbyConnectionsManager {
 
     public void setConnectionListener(TransferEventBus.ConnectionListener l) { connectionListener = l; }
     public void setTransferListener(TransferEventBus.TransferListener l)     { transferListener = l; }
+    public void setChatListener(TransferEventBus.ChatListener l)             { chatListener = l; }
+
+    /** Set the name this device advertises to others (call before startAdvertising). */
+    public void setLocalDeviceName(String name) { localDeviceName = name; }
+
+    /** Enable/disable invitation-dialog mode for the Chat tab. */
+    public void setChatMode(boolean active) { chatModeActive = active; }
 
     // ── Public API ───────────────────────────────────────────────────────────
 
     /** Start advertising so nearby devices can discover us. */
     public void startAdvertising() {
         if (isAdvertising) return;
-        String name = Build.MODEL;
+        String name = localDeviceName;
         AdvertisingOptions opts = new AdvertisingOptions.Builder()
                 .setStrategy(Strategy.P2P_CLUSTER).build();
         connectionsClient.startAdvertising(name, SERVICE_ID, connectionLifecycleCallback, opts)
@@ -151,7 +170,8 @@ public class NearbyConnectionsManager {
      */
     public void connectToDevice(String endpointId) {
         Log.d(TAG, "Requesting connection to: " + endpointId);
-        connectionsClient.requestConnection(Build.MODEL, endpointId, connectionLifecycleCallback)
+        outgoingConnectionRequests.add(endpointId);
+        connectionsClient.requestConnection(localDeviceName, endpointId, connectionLifecycleCallback)
                 .addOnFailureListener(e -> {
                     Log.e(TAG, "Connect request failed: " + e.getMessage());
                     notifyMain(() -> {
@@ -213,12 +233,87 @@ public class NearbyConnectionsManager {
         }
     }
 
+    /**
+     * Send a text chat message to a connected endpoint.
+     * Wire format: "CHAT|senderName|timestamp|text"
+     */
+    public void sendChatMessage(String endpointId, String senderName, String text) {
+        long timestamp = System.currentTimeMillis();
+        String wire = "CHAT|" + senderName + "|" + timestamp + "|" + text;
+        Payload payload = Payload.fromBytes(wire.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        connectionsClient.sendPayload(endpointId, payload)
+                .addOnFailureListener(e -> Log.w(TAG, "Chat message failed: " + e.getMessage()));
+    }
+
+    /**
+     * Send a file within a chat session. Same as sendFile but keeps the chat connection alive.
+     */
+    public void sendFileInChat(String endpointId, Uri fileUri, FileMetadata metadata) {
+        // Send metadata (already prefixed with FILE| by metadata.toBytes())
+        Payload metaPayload = Payload.fromBytes(metadata.toBytes());
+        connectionsClient.sendPayload(endpointId, metaPayload)
+                .addOnFailureListener(e -> Log.w(TAG, "Chat file meta failed: " + e.getMessage()));
+
+        try {
+            ParcelFileDescriptor pfd = appContext.getContentResolver().openFileDescriptor(fileUri, "r");
+            if (pfd == null) {
+                notifyMain(() -> {
+                    if (transferListener != null)
+                        transferListener.onTransferFailed(metadata.getFileName(), "Cannot open file");
+                });
+                return;
+            }
+            Payload filePayload = Payload.fromFile(pfd);
+            long payloadId = filePayload.getId();
+            openPfds.put(payloadId, pfd);
+            sendingFiles.put(payloadId, metadata);
+
+            connectionsClient.sendPayload(endpointId, filePayload)
+                    .addOnFailureListener(e -> {
+                        closePfd(payloadId);
+                        sendingFiles.remove(payloadId);
+                        notifyMain(() -> {
+                            if (transferListener != null)
+                                transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
+                        });
+                    });
+            Log.d(TAG, "Sending chat file payload id=" + payloadId);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to open URI for chat file send", e);
+            notifyMain(() -> {
+                if (transferListener != null)
+                    transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
+            });
+        }
+    }
+
+    /** Get a connected device by endpoint ID. */
+    public DeviceInfo getConnectedDevice(String endpointId) {
+        return connectedDevices.get(endpointId);
+    }
+
+    /** Accept a pending chat invitation (call from the Yes button in the invitation dialog). */
+    public void acceptChatInvitation(String endpointId) {
+        connectionsClient.acceptConnection(endpointId, payloadCallback)
+                .addOnFailureListener(e -> Log.e(TAG, "Accept invitation failed: " + e.getMessage()));
+    }
+
+    /** Reject a pending chat invitation (call from the No button). */
+    public void rejectChatInvitation(String endpointId) {
+        connectionsClient.rejectConnection(endpointId)
+                .addOnFailureListener(e -> Log.e(TAG, "Reject invitation failed: " + e.getMessage()));
+    }
+
     // ── Discovery callbacks ──────────────────────────────────────────────────
 
     private final EndpointDiscoveryCallback endpointDiscoveryCallback = new EndpointDiscoveryCallback() {
         @Override
         public void onEndpointFound(String endpointId, DiscoveredEndpointInfo info) {
             Log.d(TAG, "Endpoint found: " + endpointId + " (" + info.getEndpointName() + ")");
+            if (info.getEndpointName().equals(localDeviceName)) {
+                Log.d(TAG, "Ignoring self-discovery: " + endpointId);
+                return;
+            }
             discoveredDevices.put(endpointId, new DeviceInfo(endpointId, info.getEndpointName()));
             notifyDevicesUpdated();
         }
@@ -244,8 +339,18 @@ public class NearbyConnectionsManager {
         @Override
         public void onConnectionInitiated(String endpointId, ConnectionInfo info) {
             Log.d(TAG, "Connection initiated by: " + endpointId + " (" + info.getEndpointName() + ")");
-            // MVP: auto-accept all incoming connections
-            connectionsClient.acceptConnection(endpointId, payloadCallback);
+            boolean weInitiated = outgoingConnectionRequests.remove(endpointId);
+            if (chatModeActive && !weInitiated) {
+                // Incoming chat invitation — let the UI prompt the user
+                String remoteName = info.getEndpointName();
+                notifyMain(() -> {
+                    if (connectionListener != null)
+                        connectionListener.onChatInvitationReceived(endpointId, remoteName);
+                });
+            } else {
+                // File transfer mode or we initiated — auto-accept
+                connectionsClient.acceptConnection(endpointId, payloadCallback);
+            }
         }
 
         @Override
@@ -287,19 +392,38 @@ public class NearbyConnectionsManager {
         @Override
         public void onPayloadReceived(String endpointId, Payload payload) {
             if (payload.getType() == Payload.Type.BYTES) {
-                // This is file metadata sent just before the file payload
                 byte[] bytes = payload.asBytes();
                 if (bytes != null) {
-                    FileMetadata meta = FileMetadata.fromBytes(bytes);
-                    pendingReceiveMeta.put(endpointId, meta);
-                    Log.d(TAG, "Received metadata: " + meta);
+                    String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
 
-                    DeviceInfo sender = connectedDevices.get(endpointId);
-                    String senderName = sender != null ? sender.getDeviceName() : endpointId;
-                    notifyMain(() -> {
-                        if (transferListener != null)
-                            transferListener.onIncomingFile(meta, senderName);
-                    });
+                    if (raw.startsWith("CHAT|")) {
+                        // Chat text message: "CHAT|senderName|timestamp|text"
+                        String[] parts = raw.split("\\|", 4);
+                        if (parts.length == 4) {
+                            String senderName = parts[1];
+                            long parsedTime;
+                            try { parsedTime = Long.parseLong(parts[2]); }
+                            catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
+                            final long timestamp = parsedTime;
+                            String text = parts[3];
+                            notifyMain(() -> {
+                                if (chatListener != null)
+                                    chatListener.onChatMessageReceived(endpointId, senderName, text, timestamp);
+                            });
+                        }
+                    } else {
+                        // File metadata: "FILE|fileName|mimeType|fileSize" or legacy "fileName|mimeType|fileSize"
+                        FileMetadata meta = FileMetadata.fromBytes(bytes);
+                        pendingReceiveMeta.put(endpointId, meta);
+                        Log.d(TAG, "Received metadata: " + meta);
+
+                        DeviceInfo sender = connectedDevices.get(endpointId);
+                        String senderName = sender != null ? sender.getDeviceName() : endpointId;
+                        notifyMain(() -> {
+                            if (transferListener != null)
+                                transferListener.onIncomingFile(meta, senderName);
+                        });
+                    }
                 }
 
             } else if (payload.getType() == Payload.Type.FILE) {
