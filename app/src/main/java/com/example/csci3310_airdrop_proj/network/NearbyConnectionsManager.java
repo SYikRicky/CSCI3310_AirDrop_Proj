@@ -58,6 +58,7 @@ public class NearbyConnectionsManager {
     // Listener callbacks (set by MainActivity)
     private TransferEventBus.ConnectionListener connectionListener;
     private TransferEventBus.TransferListener transferListener;
+    private TransferEventBus.ChatListener chatListener;
 
     // ── Discovery state ──────────────────────────────────────────────────────
     private final Map<String, DeviceInfo> discoveredDevices = new HashMap<>();
@@ -84,6 +85,7 @@ public class NearbyConnectionsManager {
 
     public void setConnectionListener(TransferEventBus.ConnectionListener l) { connectionListener = l; }
     public void setTransferListener(TransferEventBus.TransferListener l)     { transferListener = l; }
+    public void setChatListener(TransferEventBus.ChatListener l)             { chatListener = l; }
 
     // ── Public API ───────────────────────────────────────────────────────────
 
@@ -213,6 +215,65 @@ public class NearbyConnectionsManager {
         }
     }
 
+    /**
+     * Send a text chat message to a connected endpoint.
+     * Wire format: "CHAT|senderName|timestamp|text"
+     */
+    public void sendChatMessage(String endpointId, String senderName, String text) {
+        long timestamp = System.currentTimeMillis();
+        String wire = "CHAT|" + senderName + "|" + timestamp + "|" + text;
+        Payload payload = Payload.fromBytes(wire.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        connectionsClient.sendPayload(endpointId, payload)
+                .addOnFailureListener(e -> Log.w(TAG, "Chat message failed: " + e.getMessage()));
+    }
+
+    /**
+     * Send a file within a chat session. Same as sendFile but keeps the chat connection alive.
+     */
+    public void sendFileInChat(String endpointId, Uri fileUri, FileMetadata metadata) {
+        // Send metadata (already prefixed with FILE| by metadata.toBytes())
+        Payload metaPayload = Payload.fromBytes(metadata.toBytes());
+        connectionsClient.sendPayload(endpointId, metaPayload)
+                .addOnFailureListener(e -> Log.w(TAG, "Chat file meta failed: " + e.getMessage()));
+
+        try {
+            ParcelFileDescriptor pfd = appContext.getContentResolver().openFileDescriptor(fileUri, "r");
+            if (pfd == null) {
+                notifyMain(() -> {
+                    if (transferListener != null)
+                        transferListener.onTransferFailed(metadata.getFileName(), "Cannot open file");
+                });
+                return;
+            }
+            Payload filePayload = Payload.fromFile(pfd);
+            long payloadId = filePayload.getId();
+            openPfds.put(payloadId, pfd);
+            sendingFiles.put(payloadId, metadata);
+
+            connectionsClient.sendPayload(endpointId, filePayload)
+                    .addOnFailureListener(e -> {
+                        closePfd(payloadId);
+                        sendingFiles.remove(payloadId);
+                        notifyMain(() -> {
+                            if (transferListener != null)
+                                transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
+                        });
+                    });
+            Log.d(TAG, "Sending chat file payload id=" + payloadId);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to open URI for chat file send", e);
+            notifyMain(() -> {
+                if (transferListener != null)
+                    transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
+            });
+        }
+    }
+
+    /** Get a connected device by endpoint ID. */
+    public DeviceInfo getConnectedDevice(String endpointId) {
+        return connectedDevices.get(endpointId);
+    }
+
     // ── Discovery callbacks ──────────────────────────────────────────────────
 
     private final EndpointDiscoveryCallback endpointDiscoveryCallback = new EndpointDiscoveryCallback() {
@@ -287,19 +348,38 @@ public class NearbyConnectionsManager {
         @Override
         public void onPayloadReceived(String endpointId, Payload payload) {
             if (payload.getType() == Payload.Type.BYTES) {
-                // This is file metadata sent just before the file payload
                 byte[] bytes = payload.asBytes();
                 if (bytes != null) {
-                    FileMetadata meta = FileMetadata.fromBytes(bytes);
-                    pendingReceiveMeta.put(endpointId, meta);
-                    Log.d(TAG, "Received metadata: " + meta);
+                    String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
 
-                    DeviceInfo sender = connectedDevices.get(endpointId);
-                    String senderName = sender != null ? sender.getDeviceName() : endpointId;
-                    notifyMain(() -> {
-                        if (transferListener != null)
-                            transferListener.onIncomingFile(meta, senderName);
-                    });
+                    if (raw.startsWith("CHAT|")) {
+                        // Chat text message: "CHAT|senderName|timestamp|text"
+                        String[] parts = raw.split("\\|", 4);
+                        if (parts.length == 4) {
+                            String senderName = parts[1];
+                            long parsedTime;
+                            try { parsedTime = Long.parseLong(parts[2]); }
+                            catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
+                            final long timestamp = parsedTime;
+                            String text = parts[3];
+                            notifyMain(() -> {
+                                if (chatListener != null)
+                                    chatListener.onChatMessageReceived(endpointId, senderName, text, timestamp);
+                            });
+                        }
+                    } else {
+                        // File metadata: "FILE|fileName|mimeType|fileSize" or legacy "fileName|mimeType|fileSize"
+                        FileMetadata meta = FileMetadata.fromBytes(bytes);
+                        pendingReceiveMeta.put(endpointId, meta);
+                        Log.d(TAG, "Received metadata: " + meta);
+
+                        DeviceInfo sender = connectedDevices.get(endpointId);
+                        String senderName = sender != null ? sender.getDeviceName() : endpointId;
+                        notifyMain(() -> {
+                            if (transferListener != null)
+                                transferListener.onIncomingFile(meta, senderName);
+                        });
+                    }
                 }
 
             } else if (payload.getType() == Payload.Type.FILE) {

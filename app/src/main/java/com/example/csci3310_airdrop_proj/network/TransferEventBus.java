@@ -52,4 +52,12 @@ public class TransferEventBus {
         /** Called when a transfer fails. */
         void onTransferFailed(String fileName, String error);
     }
+
+    /**
+     * Implemented by MainActivity to receive chat text messages from connected devices.
+     */
+    public interface ChatListener {
+        /** Called when a text message is received from a connected device. */
+        void onChatMessageReceived(String endpointId, String senderName, String text, long timestamp);
+    }
 }

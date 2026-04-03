@@ -22,6 +22,18 @@
     <string name="transfer_complete">Transfer complete</string>
     <string name="transfer_failed">Transfer failed</string>
 
+    <!-- Chat -->
+    <string name="tab_chat">Chat</string>
+    <string name="chat_nearby_devices">Nearby Devices</string>
+    <string name="chat_searching">Tap a device to start chatting</string>
+    <string name="chat_no_devices">Searching for nearby devices…</string>
+    <string name="chat_hint">Type a message</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_attach_file">Attach file</string>
+    <string name="chat_connecting">Connecting…</string>
+    <string name="chat_connected">Connected</string>
+    <string name="chat_disconnected">Disconnected</string>
+
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
 </resources>

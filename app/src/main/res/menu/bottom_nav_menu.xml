@@ -11,4 +11,9 @@
         android:icon="@android:drawable/ic_menu_save"
         android:title="@string/tab_receive" />
 
+    <item
+        android:id="@+id/nav_chat"
+        android:icon="@android:drawable/ic_dialog_email"
+        android:title="@string/tab_chat" />
+
 </menu>

@@ -33,7 +33,7 @@ public class FileMetadata implements Parcelable {
      * Format: "fileName|mimeType|fileSize"
      */
     public byte[] toBytes() {
-        String encoded = fileName + "|" + mimeType + "|" + fileSize;
+        String encoded = "FILE|" + fileName + "|" + mimeType + "|" + fileSize;
         return encoded.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -43,6 +43,10 @@ public class FileMetadata implements Parcelable {
     public static FileMetadata fromBytes(byte[] bytes) {
         if (bytes == null) return new FileMetadata("file", "*/*", 0);
         String s = new String(bytes, StandardCharsets.UTF_8);
+        // Strip the "FILE|" prefix if present (new wire format)
+        if (s.startsWith("FILE|")) {
+            s = s.substring(5);
+        }
         String[] parts = s.split("\\|", 3);
         if (parts.length == 3) {
             try {

@@ -19,13 +19,18 @@ import com.example.csci3310_airdrop_proj.model.FileMetadata;
 import com.example.csci3310_airdrop_proj.model.TransferProgress;
 import com.example.csci3310_airdrop_proj.network.NearbyConnectionsManager;
 import com.example.csci3310_airdrop_proj.network.TransferEventBus;
+import com.example.csci3310_airdrop_proj.model.ChatMessage;
+import com.example.csci3310_airdrop_proj.ui.fragment.ChatDeviceListFragment;
+import com.example.csci3310_airdrop_proj.ui.fragment.ChatRoomFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.DeviceDiscoveryFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.ReceiveModeFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MainActivity — the single Activity that hosts all Fragments.
@@ -42,7 +47,8 @@ import java.util.List;
  */
 public class MainActivity extends AppCompatActivity
         implements TransferEventBus.ConnectionListener,
-                   TransferEventBus.TransferListener {
+                   TransferEventBus.TransferListener,
+                   TransferEventBus.ChatListener {
 
     // ── Network ──────────────────────────────────────────────────────────────
     private NearbyConnectionsManager nearbyManager;
@@ -55,6 +61,12 @@ public class MainActivity extends AppCompatActivity
     // ── Fragment references ──────────────────────────────────────────────────
     private DeviceDiscoveryFragment discoveryFragment;
     private ReceiveModeFragment     receiveModeFragment;
+    private ChatDeviceListFragment  chatDeviceListFragment;
+    private ChatRoomFragment        chatRoomFragment;
+
+    // ── Chat state ────────────────────────────────────────────────────────────
+    private String activeChatEndpointId;
+    private final Map<String, List<ChatMessage>> chatHistory = new HashMap<>();
 
     // ── Permission launcher ───────────────────────────────────────────────────
     private final ActivityResultLauncher<String[]> permissionLauncher =
@@ -80,6 +92,7 @@ public class MainActivity extends AppCompatActivity
         nearbyManager = new NearbyConnectionsManager(this);
         nearbyManager.setConnectionListener(this);
         nearbyManager.setTransferListener(this);
+        nearbyManager.setChatListener(this);
 
         setupBottomNavigation();
         requestRequiredPermissions();
@@ -108,6 +121,9 @@ public class MainActivity extends AppCompatActivity
                 return true;
             } else if (id == R.id.nav_receive) {
                 showReceiveMode();
+                return true;
+            } else if (id == R.id.nav_chat) {
+                showChatMode();
                 return true;
             }
             return false;
@@ -180,6 +196,83 @@ public class MainActivity extends AppCompatActivity
         nearbyManager.stopAll();
     }
 
+    // ── Chat flow ─────────────────────────────────────────────────────────────
+
+    private void showChatMode() {
+        nearbyManager.stopDiscovery();
+        nearbyManager.stopAdvertising();
+        activeChatEndpointId = null;
+        chatRoomFragment = null;
+        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        chatDeviceListFragment = new ChatDeviceListFragment();
+        replaceFragment(chatDeviceListFragment, ChatDeviceListFragment.TAG);
+        // Both advertise and discover so either device can initiate
+        nearbyManager.startAdvertising();
+        nearbyManager.startDiscovery();
+    }
+
+    /** Called by ChatDeviceListFragment when a device is tapped. */
+    public void onChatDeviceSelected(DeviceInfo device) {
+        activeChatEndpointId = device.getEndpointId();
+        if (!device.isConnected()) {
+            nearbyManager.connectToDevice(device.getEndpointId());
+        }
+        openChatRoom(device);
+    }
+
+    private void openChatRoom(DeviceInfo device) {
+        chatRoomFragment = new ChatRoomFragment();
+        Bundle args = new Bundle();
+        args.putString(ChatRoomFragment.ARG_ENDPOINT_ID, device.getEndpointId());
+        args.putString(ChatRoomFragment.ARG_DEVICE_NAME, device.getDeviceName());
+        chatRoomFragment.setArguments(args);
+
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container, chatRoomFragment, ChatRoomFragment.TAG)
+                .addToBackStack("chatroom")
+                .commit();
+
+        // Restore chat history if any
+        List<ChatMessage> history = chatHistory.get(device.getEndpointId());
+        if (history != null) {
+            // Post to allow fragment view creation to complete
+            chatRoomFragment.requireView().post(() -> {
+                for (ChatMessage msg : history) {
+                    chatRoomFragment.addMessage(msg);
+                }
+            });
+        }
+    }
+
+    /** Called by ChatRoomFragment to send a text message. */
+    public void onChatSendText(String endpointId, String text) {
+        nearbyManager.sendChatMessage(endpointId, Build.MODEL, text);
+        ChatMessage msg = new ChatMessage(
+                ChatMessage.Type.TEXT, Build.MODEL, text, System.currentTimeMillis(), true);
+        addToChatHistory(endpointId, msg);
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
+            chatRoomFragment.addMessage(msg);
+        }
+    }
+
+    /** Called by ChatRoomFragment to send a file. */
+    public void onChatSendFile(String endpointId, Uri fileUri, FileMetadata metadata) {
+        nearbyManager.sendFileInChat(endpointId, fileUri, metadata);
+        ChatMessage msg = new ChatMessage(
+                ChatMessage.Type.FILE, Build.MODEL, metadata.getFileName(),
+                System.currentTimeMillis(), true);
+        msg.setFileMetadata(metadata);
+        addToChatHistory(endpointId, msg);
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
+            chatRoomFragment.addMessage(msg);
+        }
+    }
+
+    private void addToChatHistory(String endpointId, ChatMessage msg) {
+        chatHistory.computeIfAbsent(endpointId, k -> new ArrayList<>()).add(msg);
+    }
+
     // ── Permission handling ───────────────────────────────────────────────────
 
     /**
@@ -224,17 +317,30 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onDevicesUpdated(List<DeviceInfo> devices) {
-        // Callbacks from NearbyConnectionsManager already arrive on main thread
         if (discoveryFragment != null && discoveryFragment.isAdded()) {
             discoveryFragment.updateDeviceList(devices);
+        }
+        if (chatDeviceListFragment != null && chatDeviceListFragment.isAdded()) {
+            chatDeviceListFragment.updateDeviceList(devices);
         }
     }
 
     @Override
     public void onConnectionEstablished(DeviceInfo device) {
         Toast.makeText(this, "Connected to " + device.getDeviceName(), Toast.LENGTH_SHORT).show();
-        // Connection is ready — send the pending file
-        if (pendingFileUri != null && pendingFileMeta != null) {
+
+        if (activeChatEndpointId != null && activeChatEndpointId.equals(device.getEndpointId())) {
+            // Chat mode — notify chatroom of connection
+            if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
+                chatRoomFragment.showConnected();
+            }
+        } else if (chatDeviceListFragment != null && chatDeviceListFragment.isAdded()
+                && activeChatEndpointId == null) {
+            // Someone connected to us while we're on the chat device list — open chatroom
+            activeChatEndpointId = device.getEndpointId();
+            openChatRoom(device);
+        } else if (pendingFileUri != null && pendingFileMeta != null) {
+            // Send mode — send the pending file
             nearbyManager.sendFile(device.getEndpointId(), pendingFileUri, pendingFileMeta);
         }
     }
@@ -250,16 +356,29 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onDisconnected(String endpointId) {
         Toast.makeText(this, "Disconnected", Toast.LENGTH_SHORT).show();
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()
+                && endpointId.equals(activeChatEndpointId)) {
+            chatRoomFragment.showDisconnected();
+        }
     }
 
     // ── TransferEventBus.TransferListener ────────────────────────────────────
 
     @Override
     public void onIncomingFile(FileMetadata meta, String fromDeviceName) {
-        String msg = "Receiving \"" + meta.getFileName() + "\" from " + fromDeviceName;
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+        String text = "Receiving \"" + meta.getFileName() + "\" from " + fromDeviceName;
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
         if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
             receiveModeFragment.setStatusText("Receiving: " + meta.getFileName());
+        }
+        // Show file message in chat if active
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()
+                && activeChatEndpointId != null) {
+            ChatMessage msg = new ChatMessage(ChatMessage.Type.FILE, fromDeviceName,
+                    meta.getFileName(), System.currentTimeMillis(), false);
+            msg.setFileMetadata(meta);
+            addToChatHistory(activeChatEndpointId, msg);
+            chatRoomFragment.addMessage(msg);
         }
     }
 
@@ -286,14 +405,14 @@ public class MainActivity extends AppCompatActivity
             Toast.makeText(this, "Sent: " + finalProgress.getFileName(), Toast.LENGTH_SHORT).show();
             if (discoveryFragment != null && discoveryFragment.isAdded()) {
                 discoveryFragment.showTransferComplete(finalProgress.getFileName());
+                // Return to Send mode only when in Send flow (not chat)
+                getSupportFragmentManager().popBackStack();
+                pendingFileUri  = null;
+                pendingFileMeta = null;
+                nearbyManager.stopDiscovery();
             }
-            // Return to Send mode after a brief moment
-            getSupportFragmentManager().popBackStack();
-            pendingFileUri  = null;
-            pendingFileMeta = null;
-            nearbyManager.stopDiscovery();
+            // In chat mode, don't pop — stay in the chatroom
         } else {
-            // Receiver side: FileTransferService will show a notification when saved
             Toast.makeText(this, "File saved: " + finalProgress.getFileName(), Toast.LENGTH_LONG).show();
             if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
                 receiveModeFragment.setStatusText("Saved: " + finalProgress.getFileName());
@@ -306,6 +425,22 @@ public class MainActivity extends AppCompatActivity
         Toast.makeText(this, "Transfer failed: " + error, Toast.LENGTH_SHORT).show();
         if (discoveryFragment != null && discoveryFragment.isAdded()) {
             discoveryFragment.showTransferFailed(error);
+        }
+    }
+
+    // ── TransferEventBus.ChatListener ─────────────────────────────────────────
+
+    @Override
+    public void onChatMessageReceived(String endpointId, String senderName, String text, long timestamp) {
+        ChatMessage msg = new ChatMessage(ChatMessage.Type.TEXT, senderName, text, timestamp, false);
+        addToChatHistory(endpointId, msg);
+
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()
+                && endpointId.equals(activeChatEndpointId)) {
+            chatRoomFragment.addMessage(msg);
+        } else {
+            // If not in the chatroom, show a toast
+            Toast.makeText(this, senderName + ": " + text, Toast.LENGTH_SHORT).show();
         }
     }
 }
