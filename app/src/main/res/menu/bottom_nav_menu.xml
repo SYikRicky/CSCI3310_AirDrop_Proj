@@ -11,4 +11,9 @@
         android:icon="@android:drawable/ic_menu_save"
         android:title="@string/tab_receive" />
 
+    <item
+        android:id="@+id/nav_walkie_talkie"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:title="@string/tab_walkie_talkie" />
+
 </menu>

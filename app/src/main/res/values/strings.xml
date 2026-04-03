@@ -4,6 +4,7 @@
     <!-- Bottom navigation tabs -->
     <string name="tab_send">Send</string>
     <string name="tab_receive">Receive</string>
+    <string name="tab_walkie_talkie">Walkie</string>
 
     <!-- Send mode -->
     <string name="btn_pick_file">Pick File</string>
@@ -24,4 +25,25 @@
 
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
+
+    <!-- Walkie-Talkie -->
+    <string name="wt_join_title">Walkie-Talkie Channel</string>
+    <string name="wt_join_message">Join the walkie-talkie channel as \"%1$s\"?\n\nEveryone on this Wi-Fi network can hear you.</string>
+    <string name="wt_join">Join Channel</string>
+    <string name="wt_cancel">Cancel</string>
+    <string name="wt_joined">Joined as %1$s</string>
+    <string name="wt_join_failed">Could not join: %1$s</string>
+    <string name="wt_leave_channel">Leave Channel</string>
+    <string name="wt_left_channel">Left the channel</string>
+    <string name="wt_not_joined">Not in channel</string>
+    <string name="wt_no_users">Just you in the channel</string>
+    <string name="wt_hold_to_talk">Hold\nto Talk</string>
+    <string name="wt_hold_to_talk_hint">Hold the button and speak</string>
+    <string name="wt_talking">Speaking…</string>
+    <string name="wt_release_to_stop">Release to stop</string>
+    <string name="wt_speaking">%1$s is speaking…</string>
+    <string name="wt_someone_speaking">Someone is speaking…</string>
+    <string name="wt_mic_permission_required">Microphone permission is required for walkie-talkie</string>
+
+    <!-- Plurals are in plurals.xml -->
 </resources>
