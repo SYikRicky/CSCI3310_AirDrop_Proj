@@ -42,6 +42,7 @@ dependencies {
     implementation(libs.fragment)
     implementation(libs.lifecycle.service)
     implementation(libs.play.services.location)
+    implementation(libs.osmdroid)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)

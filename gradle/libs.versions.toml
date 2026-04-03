@@ -11,6 +11,7 @@ nearby = "18.7.0"
 fragment = "1.8.6"
 lifecycleService = "2.9.0"
 playServicesLocation = "21.3.0"
+osmdroid = "6.1.20"
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -24,6 +25,7 @@ nearby-connections = { group = "com.google.android.gms", name = "play-services-n
 fragment = { group = "androidx.fragment", name = "fragment", version.ref = "fragment" }
 lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+osmdroid = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
