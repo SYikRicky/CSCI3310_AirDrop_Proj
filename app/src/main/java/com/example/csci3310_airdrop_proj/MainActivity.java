@@ -117,10 +117,12 @@ public class MainActivity extends AppCompatActivity {
             final long   _size     = size;
             // Post to the main looper so onViewCreated() has run before we touch views
             getSupportFragmentManager().executePendingTransactions();
-            sendModeFragment.getView() != null
-                    ? sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size)
-                    : new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
-                            sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size));
+            if (sendModeFragment.getView() != null) {
+                sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size);
+            } else {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                        sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size));
+            }
         }
     }
 
@@ -156,11 +158,17 @@ public class MainActivity extends AppCompatActivity {
                     public void onSuccess(SharedFile file) {
                         Toast.makeText(MainActivity.this,
                                 "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                        // Update fragment UI if it is still on screen
                         if (sendModeFragment != null && sendModeFragment.isAdded()) {
                             sendModeFragment.onUploadSuccess();
-                            // FileListFragment Firestore listener refreshes automatically
                         }
                         sendModeFragment = null;
+                        // Always navigate back — do it here so it runs even if
+                        // the fragment's isAdded() check above returned false.
+                        new android.os.Handler(android.os.Looper.getMainLooper())
+                                .postDelayed(() ->
+                                        getSupportFragmentManager().popBackStack(),
+                                        800);
                     }
 
                     @Override

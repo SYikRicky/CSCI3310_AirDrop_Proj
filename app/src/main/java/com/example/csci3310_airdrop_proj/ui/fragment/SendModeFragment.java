@@ -116,22 +116,13 @@ public class SendModeFragment extends Fragment {
         btnUpload.setEnabled(false);
     }
 
-    /** Called when upload completes successfully. */
+    /** Called when upload completes successfully. Navigation is handled by MainActivity. */
     public void onUploadSuccess() {
-        // Update UI safely (views may occasionally be null during transitions)
         if (progressBar != null) progressBar.setProgress(100);
         if (tvStatus != null) {
             tvStatus.setVisibility(View.VISIBLE);
             tvStatus.setText(R.string.upload_success);
         }
-        // Post navigation so user briefly sees "Upload complete!" and so the
-        // FragmentManager has no pending transactions when popBackStack() fires.
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            androidx.fragment.app.FragmentActivity activity = getActivity();
-            if (activity != null && !activity.isFinishing() && isAdded()) {
-                activity.getSupportFragmentManager().popBackStack();
-            }
-        }, 800);
     }
 
     /** Called when upload fails. */
