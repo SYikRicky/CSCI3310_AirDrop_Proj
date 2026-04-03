@@ -1,27 +1,27 @@
 <resources>
-    <string name="app_name">DroidDrop</string>
+    <string name="app_name">DroidDrive</string>
 
-    <!-- Bottom navigation tabs -->
-    <string name="tab_send">Send</string>
-    <string name="tab_receive">Receive</string>
+    <!-- File list -->
+    <string name="no_files_yet">No files yet.\nTap + to upload the first one!</string>
+    <string name="drive_load_error">Could not load files. Check your internet connection.</string>
 
-    <!-- Send mode -->
+    <!-- Upload -->
     <string name="btn_pick_file">Pick File</string>
-    <string name="btn_find_devices">Find Nearby Devices</string>
+    <string name="btn_upload">Upload to Drive</string>
+    <string name="uploading">Uploading…</string>
+    <string name="upload_success">Upload complete!</string>
+    <string name="upload_failed">Upload failed</string>
 
-    <!-- Receive mode -->
+    <!-- Receive mode (kept for future use) -->
     <string name="start_receiving">Start Receiving</string>
     <string name="stop_receiving">Stop Receiving</string>
     <string name="ready_to_receive">Discoverable — waiting for files…</string>
     <string name="not_receiving">Not receiving</string>
 
-    <!-- Device discovery -->
-    <string name="no_devices_found">Searching for nearby devices…</string>
-
     <!-- Transfer status -->
-    <string name="transfer_complete">Transfer complete</string>
+    <string name="transfer_complete">Saved to Downloads</string>
     <string name="transfer_failed">Transfer failed</string>
 
     <!-- Permissions -->
-    <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
+    <string name="permission_required">Storage permission denied. You may not be able to pick or save files.</string>
 </resources>

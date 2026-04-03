@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "717640338814",
+    "project_id": "csci3310project-a4a65",
+    "storage_bucket": "csci3310project-a4a65.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:717640338814:android:29a9ce7d21285a6d8d772f",
+        "android_client_info": {
+          "package_name": "com.example.csci3310_airdrop_proj"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDtnjr73Hcc9_xNca0BY5P9ckD4zI6EJyo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -5,15 +5,16 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 import androidx.lifecycle.LifecycleService;
 
-import com.example.csci3310_airdrop_proj.R;
-import com.example.csci3310_airdrop_proj.model.FileMetadata;
 import com.example.csci3310_airdrop_proj.storage.FileStorageManager;
+import com.google.firebase.storage.FileDownloadTask;
+import com.google.firebase.storage.FirebaseStorage;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -22,27 +23,36 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Foreground Service that saves a received file from a Nearby Connections temp location
- * into the device's Downloads folder.
+ * Foreground Service that runs Firebase Storage downloads in the background.
  *
- * Started by NearbyConnectionsManager when a FILE payload transfer completes successfully.
- * Extends LifecycleService (from lifecycle-service dep) so it is lifecycle-aware.
+ * Why a Foreground Service?
+ *   Large file downloads take time. If the user navigates away from the app,
+ *   Android can kill background processes. A Foreground Service with a visible
+ *   notification keeps the process alive for the duration of the download.
  *
- * Android 14+ requirement: must call startForeground() within 5 s of onStartCommand()
- * and must declare foregroundServiceType="dataSync" in the manifest.
+ * Flow:
+ *   1. MainActivity calls ContextCompat.startForegroundService(intent) with
+ *      EXTRA_DOWNLOAD_URL and EXTRA_FILE_NAME.
+ *   2. Service calls startForeground() immediately (within 5 s — API 34 requirement).
+ *   3. Firebase Storage downloads the file to a temp location.
+ *   4. FileStorageManager copies it to the public Downloads folder.
+ *   5. Service updates the notification and stops itself.
+ *
+ * Demonstrates: Foreground Service, NotificationChannel, ExecutorService,
+ *               LifecycleService, Android 14 foregroundServiceType requirement.
  */
 public class FileTransferService extends LifecycleService {
 
-    private static final String TAG       = "FileTransferService";
+    private static final String TAG        = "FileTransferService";
     private static final String CHANNEL_ID = "dropdroid_transfer";
-    private static final int    NOTIF_ID   = 1001;
+    private static final int    NOTIF_ID   = 2001;
 
-    /** Intent extras passed by NearbyConnectionsManager */
-    public static final String EXTRA_FILE_METADATA   = "extra_file_metadata";
-    public static final String EXTRA_TEMP_FILE_PATH  = "extra_temp_file_path";
+    public static final String EXTRA_DOWNLOAD_URL = "extra_download_url";
+    public static final String EXTRA_FILE_NAME    = "extra_file_name";
+    public static final String EXTRA_MIME_TYPE    = "extra_mime_type";
 
-    private ExecutorService     executor;
-    private FileStorageManager  storageManager;
+    private ExecutorService    executor;
+    private FileStorageManager storageManager;
     private NotificationManager notifManager;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -60,72 +70,80 @@ public class FileTransferService extends LifecycleService {
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
 
-        // ── Must call startForeground immediately (within 5 s on API 34+) ──
-        Notification notification = buildNotification("Preparing to save file…");
+        // ── Must call startForeground within 5 s on API 34+ ──────────────────
+        Notification notif = buildNotification("Starting download…");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // API 34+: must provide the foreground service type
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         } else {
-            startForeground(NOTIF_ID, notification);
+            startForeground(NOTIF_ID, notif);
         }
 
-        if (intent == null) {
-            Log.w(TAG, "null intent — stopping self");
+        if (intent == null) { stopSelf(startId); return START_NOT_STICKY; }
+
+        String downloadUrl = intent.getStringExtra(EXTRA_DOWNLOAD_URL);
+        String fileName    = intent.getStringExtra(EXTRA_FILE_NAME);
+        String mimeType    = intent.getStringExtra(EXTRA_MIME_TYPE);
+
+        if (downloadUrl == null || fileName == null) {
+            Log.e(TAG, "Missing URL or file name — stopping");
             stopSelf(startId);
             return START_NOT_STICKY;
         }
 
-        // ── Extract extras ────────────────────────────────────────────────────
-        FileMetadata meta;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            meta = intent.getParcelableExtra(EXTRA_FILE_METADATA, FileMetadata.class);
-        } else {
-            //noinspection deprecation
-            meta = intent.getParcelableExtra(EXTRA_FILE_METADATA);
-        }
-        String tempPath = intent.getStringExtra(EXTRA_TEMP_FILE_PATH);
+        final String finalUrl      = downloadUrl;
+        final String finalName     = fileName;
+        final String finalMime     = mimeType != null ? mimeType : "*/*";
+        final int    finalStartId  = startId;
 
-        if (meta == null || tempPath == null) {
-            Log.e(TAG, "Missing metadata or temp path — stopping");
+        // ── Download via Firebase Storage SDK ─────────────────────────────────
+        updateNotification("Downloading: " + finalName + "…");
+
+        // Create a temp file for Firebase to write into
+        File tempFile;
+        try {
+            tempFile = File.createTempFile("dropdrive_", "_" + finalName, getCacheDir());
+        } catch (IOException e) {
+            Log.e(TAG, "Cannot create temp file", e);
             stopSelf(startId);
             return START_NOT_STICKY;
         }
 
-        final FileMetadata finalMeta = meta;
-        final String       finalPath = tempPath;
-        final int          finalId   = startId;
+        final File finalTemp = tempFile;
 
-        // ── Do the I/O on a background thread ────────────────────────────────
-        executor.submit(() -> {
-            File tempFile = new File(finalPath);
-            if (!tempFile.exists()) {
-                Log.e(TAG, "Temp file missing: " + finalPath);
-                updateNotification("Save failed — file not found");
-                stopSelf(finalId);
-                return;
-            }
-
-            updateNotification("Saving: " + finalMeta.getFileName() + "…");
-
-            try (FileInputStream fis = new FileInputStream(tempFile)) {
-                storageManager.saveFile(finalMeta.getFileName(), finalMeta.getMimeType(), fis);
-                Log.d(TAG, "Saved: " + finalMeta.getFileName());
-                updateNotification("Saved: " + finalMeta.getFileName());
-            } catch (IOException e) {
-                Log.e(TAG, "Save failed", e);
-                updateNotification("Save failed: " + e.getMessage());
-            } finally {
-                // Remove the Nearby temp file to free cache space
-                if (tempFile.exists()) {
+        FirebaseStorage.getInstance()
+                .getReferenceFromUrl(finalUrl)
+                .getFile(finalTemp)
+                .addOnProgressListener(snapshot -> {
+                    long total = snapshot.getTotalByteCount();
+                    long done  = snapshot.getBytesTransferred();
+                    int  pct   = total > 0 ? (int) (done * 100L / total) : 0;
+                    updateNotification("Downloading: " + finalName + " (" + pct + "%)");
+                })
+                .addOnSuccessListener(snapshot -> {
+                    // Firebase wrote to tempFile — now copy to Downloads on background thread
+                    executor.submit(() -> {
+                        try (FileInputStream fis = new FileInputStream(finalTemp)) {
+                            Uri savedUri = storageManager.saveFile(finalName, finalMime, fis);
+                            Log.d(TAG, "Saved: " + savedUri);
+                            updateNotification("Saved: " + finalName);
+                        } catch (IOException e) {
+                            Log.e(TAG, "Copy to Downloads failed", e);
+                            updateNotification("Save failed: " + e.getMessage());
+                        } finally {
+                            //noinspection ResultOfMethodCallIgnored
+                            finalTemp.delete();
+                        }
+                        try { Thread.sleep(2500); } catch (InterruptedException ignored) {}
+                        stopSelf(finalStartId);
+                    });
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Firebase download failed", e);
+                    updateNotification("Download failed: " + e.getMessage());
                     //noinspection ResultOfMethodCallIgnored
-                    tempFile.delete();
-                }
-            }
-
-            // Brief pause so user can read the success notification, then stop
-            try { Thread.sleep(2500); } catch (InterruptedException ignored) {}
-            stopSelf(finalId);
-        });
+                    finalTemp.delete();
+                    stopSelf(finalStartId);
+                });
 
         return START_NOT_STICKY;
     }
@@ -133,38 +151,32 @@ public class FileTransferService extends LifecycleService {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (executor != null && !executor.isShutdown()) {
-            executor.shutdownNow();
-        }
+        if (executor != null && !executor.isShutdown()) executor.shutdownNow();
     }
 
     // ── Notification helpers ──────────────────────────────────────────────────
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    "DroidDrop Transfers",
-                    NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Shows file receive progress");
-            channel.setShowBadge(false);
-            notifManager.createNotificationChannel(channel);
+            NotificationChannel ch = new NotificationChannel(
+                    CHANNEL_ID, "DroidDrive Transfers", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("File upload/download progress");
+            ch.setShowBadge(false);
+            notifManager.createNotificationChannel(ch);
         }
     }
 
     private Notification buildNotification(String text) {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("DroidDrop")
+                .setContentTitle("DroidDrive")
                 .setContentText(text)
-                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
     }
 
     private void updateNotification(String text) {
-        if (notifManager != null) {
-            notifManager.notify(NOTIF_ID, buildNotification(text));
-        }
+        if (notifManager != null) notifManager.notify(NOTIF_ID, buildNotification(text));
     }
 }

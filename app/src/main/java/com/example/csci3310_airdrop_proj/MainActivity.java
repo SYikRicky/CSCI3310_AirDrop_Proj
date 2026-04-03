@@ -1,6 +1,7 @@
 package com.example.csci3310_airdrop_proj;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -11,61 +12,63 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
-import androidx.fragment.app.Fragment;
-import androidx.fragment.app.FragmentManager;
 
-import com.example.csci3310_airdrop_proj.model.DeviceInfo;
-import com.example.csci3310_airdrop_proj.model.FileMetadata;
-import com.example.csci3310_airdrop_proj.model.TransferProgress;
-import com.example.csci3310_airdrop_proj.network.NearbyConnectionsManager;
-import com.example.csci3310_airdrop_proj.network.TransferEventBus;
-import com.example.csci3310_airdrop_proj.ui.fragment.DeviceDiscoveryFragment;
-import com.example.csci3310_airdrop_proj.ui.fragment.ReceiveModeFragment;
+import com.example.csci3310_airdrop_proj.model.SharedFile;
+import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
+import com.example.csci3310_airdrop_proj.service.FileTransferService;
+import com.example.csci3310_airdrop_proj.ui.fragment.FileListFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
-import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MainActivity — the single Activity that hosts all Fragments.
+ * MainActivity — single Activity host.
  *
  * Responsibilities:
- *  1. Owns and initialises NearbyConnectionsManager.
- *  2. Implements TransferEventBus.ConnectionListener + TransferListener and
- *     forwards events to the currently visible Fragment.
- *  3. Hosts BottomNavigationView to switch between Send / Receive modes.
- *  4. Handles runtime permission requests.
- *  5. Orchestrates the send flow: SendModeFragment → DeviceDiscoveryFragment → transfer.
+ *  1. Creates and exposes SharedDriveRepository (singleton for the app's lifetime).
+ *  2. Hosts two Fragments: FileListFragment (drive view) and SendModeFragment (upload).
+ *  3. Handles runtime permission requests (storage, notifications).
+ *  4. Orchestrates upload: delegates to SharedDriveRepository, forwards
+ *     progress/success/failure callbacks to SendModeFragment.
+ *  5. Starts FileTransferService for Firebase downloads (keeps download alive
+ *     even if user navigates away from the app).
+ *  6. Handles incoming ACTION_SEND Intents (cross-app share → upload flow).
  *
- * Demonstrates: Activity lifecycle, Fragments, Intents, Permissions, Services.
+ * Demonstrates: Activity lifecycle, Fragment management, Intents (explicit +
+ *               implicit + ACTION_SEND), runtime permissions, Foreground Service.
  */
-public class MainActivity extends AppCompatActivity
-        implements TransferEventBus.ConnectionListener,
-                   TransferEventBus.TransferListener {
+public class MainActivity extends AppCompatActivity {
 
-    // ── Network ──────────────────────────────────────────────────────────────
-    private NearbyConnectionsManager nearbyManager;
+    private SharedDriveRepository repository;
+    private SendModeFragment      sendModeFragment;
 
-    // ── Send-flow state ───────────────────────────────────────────────────────
-    /** URI of the file the user picked in SendModeFragment — held until a device is chosen. */
-    private Uri          pendingFileUri;
-    private FileMetadata pendingFileMeta;
-
-    // ── Fragment references ──────────────────────────────────────────────────
-    private DeviceDiscoveryFragment discoveryFragment;
-    private ReceiveModeFragment     receiveModeFragment;
+    // ── File picker launcher (used by FileListFragment FAB via openFilePicker()) ──
+    private final ActivityResultLauncher<Intent> filePickerLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri uri = result.getData().getData();
+                            if (uri != null) {
+                                getContentResolver().takePersistableUriPermission(
+                                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                // Resolve metadata here so navigateToUpload can pre-fill the fragment
+                                String fileName = resolveFileName(uri);
+                                String mimeType = resolveMimeType(uri);
+                                long   fileSize = resolveFileSize(uri);
+                                navigateToUpload(uri, fileName, mimeType, fileSize);
+                            }
+                        }
+                    });
 
     // ── Permission launcher ───────────────────────────────────────────────────
     private final ActivityResultLauncher<String[]> permissionLauncher =
             registerForActivityResult(
                     new ActivityResultContracts.RequestMultiplePermissions(),
                     results -> {
-                        boolean denied = results.containsValue(Boolean.FALSE);
-                        if (denied) {
-                            Toast.makeText(this,
-                                    R.string.permission_required,
-                                    Toast.LENGTH_LONG).show();
+                        if (results.containsValue(Boolean.FALSE)) {
+                            Toast.makeText(this, R.string.permission_required, Toast.LENGTH_LONG).show();
                         }
                     });
 
@@ -76,236 +79,198 @@ public class MainActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Initialise NearbyConnectionsManager and register this Activity as listener
-        nearbyManager = new NearbyConnectionsManager(this);
-        nearbyManager.setConnectionListener(this);
-        nearbyManager.setTransferListener(this);
-
-        setupBottomNavigation();
+        repository = new SharedDriveRepository();
         requestRequiredPermissions();
 
-        // Show Send mode by default on first launch
         if (savedInstanceState == null) {
-            showSendMode();
+            // Check if launched by an ACTION_SEND intent from another app
+            if (Intent.ACTION_SEND.equals(getIntent().getAction())) {
+                handleShareIntent(getIntent());
+            } else {
+                showFileList();
+            }
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // Clean up all Nearby Connections state to avoid leaking resources
-        nearbyManager.stopAll();
+    // ── Navigation ────────────────────────────────────────────────────────────
+
+    private void showFileList() {
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container, new FileListFragment(), FileListFragment.TAG)
+                .commit();
     }
 
-    // ── Bottom Navigation ─────────────────────────────────────────────────────
+    private void navigateToUpload(Uri uri, String fileName, String mimeType, long size) {
+        sendModeFragment = new SendModeFragment();
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container, sendModeFragment, "upload")
+                .addToBackStack("upload")
+                .commit();
 
-    private void setupBottomNavigation() {
-        BottomNavigationView bottomNav = findViewById(R.id.bottom_nav);
-        bottomNav.setOnItemSelectedListener(item -> {
-            int id = item.getItemId();
-            if (id == R.id.nav_send) {
-                showSendMode();
-                return true;
-            } else if (id == R.id.nav_receive) {
-                showReceiveMode();
-                return true;
+        // Pre-fill the fragment after its view is created
+        if (uri != null && fileName != null) {
+            final Uri    _uri      = uri;
+            final String _fileName = fileName;
+            final String _mimeType = mimeType;
+            final long   _size     = size;
+            // Post to the main looper so onViewCreated() has run before we touch views
+            getSupportFragmentManager().executePendingTransactions();
+            sendModeFragment.getView() != null
+                    ? sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size)
+                    : new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                            sendModeFragment.setPreselectedFile(_uri, _fileName, _mimeType, _size));
+        }
+    }
+
+    // ── Public API for Fragments ──────────────────────────────────────────────
+
+    /** Returns the app-wide repository. Called by FileListFragment. */
+    public SharedDriveRepository getRepository() { return repository; }
+
+    /** Called by FileListFragment FAB — triggers system file picker. */
+    public void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        filePickerLauncher.launch(intent);
+    }
+
+    /**
+     * Called by SendModeFragment when user taps "Upload to Drive".
+     * Delegates to SharedDriveRepository; forwards progress to SendModeFragment.
+     */
+    public void uploadFile(Uri uri, String fileName, String mimeType, long fileSize) {
+        repository.uploadFile(uri, fileName, mimeType, fileSize,
+                getContentResolver(),
+                new SharedDriveRepository.UploadCallback() {
+                    @Override
+                    public void onProgress(int percent) {
+                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
+                            sendModeFragment.onUploadProgress(percent);
+                        }
+                    }
+
+                    @Override
+                    public void onSuccess(SharedFile file) {
+                        Toast.makeText(MainActivity.this,
+                                "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
+                            sendModeFragment.onUploadSuccess();
+                            // FileListFragment Firestore listener refreshes automatically
+                        }
+                        sendModeFragment = null;
+                    }
+
+                    @Override
+                    public void onFailure(Exception e) {
+                        Toast.makeText(MainActivity.this,
+                                "Upload failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
+                            sendModeFragment.onUploadFailure(e.getMessage());
+                        }
+                    }
+                });
+    }
+
+    /**
+     * Called by FileListFragment when user taps the download button on a file.
+     * Starts FileTransferService — keeps the download alive even if app is backgrounded.
+     */
+    public void downloadFile(SharedFile file) {
+        Intent intent = new Intent(this, FileTransferService.class);
+        intent.putExtra(FileTransferService.EXTRA_DOWNLOAD_URL, file.getDownloadUrl());
+        intent.putExtra(FileTransferService.EXTRA_FILE_NAME,    file.getFileName());
+        intent.putExtra(FileTransferService.EXTRA_MIME_TYPE,    file.getMimeType());
+        ContextCompat.startForegroundService(this, intent);
+        Toast.makeText(this, "Downloading: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Called by FileListFragment after the user confirms deletion.
+     */
+    public void deleteFile(SharedFile file) {
+        repository.deleteFile(file, new SharedDriveRepository.DeleteCallback() {
+            @Override
+            public void onSuccess() {
+                Toast.makeText(MainActivity.this,
+                        "Deleted: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                // FileListFragment Firestore listener refreshes automatically
             }
-            return false;
+
+            @Override
+            public void onFailure(Exception e) {
+                Toast.makeText(MainActivity.this,
+                        "Delete failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
         });
     }
 
-    private void showSendMode() {
-        // Stop any active discovery when switching away from send mode
-        nearbyManager.stopDiscovery();
-        pendingFileUri  = null;
-        pendingFileMeta = null;
-        // Clear back stack and show fresh SendModeFragment
-        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
-        replaceFragment(new SendModeFragment(), "send");
-    }
-
-    private void showReceiveMode() {
-        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
-        receiveModeFragment = new ReceiveModeFragment();
-        replaceFragment(receiveModeFragment, "receive");
-    }
-
-    private void replaceFragment(Fragment fragment, String tag) {
-        getSupportFragmentManager()
-                .beginTransaction()
-                .replace(R.id.fragment_container, fragment, tag)
-                .commit();
-    }
-
-    // ── Send flow (called by SendModeFragment) ────────────────────────────────
+    // ── Cross-app share handling ──────────────────────────────────────────────
 
     /**
-     * Called by SendModeFragment after the user picks a file.
-     * Navigates to DeviceDiscoveryFragment and starts discovery.
+     * Handles files shared from other apps (Gallery, Files, etc.) via ACTION_SEND.
+     * Navigates directly to the upload screen with the file pre-selected.
      */
-    public void onFilePicked(Uri uri, FileMetadata metadata) {
-        pendingFileUri  = uri;
-        pendingFileMeta = metadata;
+    private void handleShareIntent(Intent intent) {
+        Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        if (uri == null) { showFileList(); return; }
 
-        discoveryFragment = new DeviceDiscoveryFragment();
-        getSupportFragmentManager()
-                .beginTransaction()
-                .replace(R.id.fragment_container, discoveryFragment, DeviceDiscoveryFragment.TAG)
-                .addToBackStack("discovery") // allow Back to return to SendModeFragment
-                .commit();
-
-        // Start discovering nearby devices advertising DroidDrop
-        nearbyManager.startDiscovery();
+        String mimeType = intent.getType();
+        String fileName = resolveFileName(uri);
+        showFileList(); // push drive as back-stack base
+        navigateToUpload(uri, fileName, mimeType, resolveFileSize(uri));
     }
 
-    /**
-     * Called by DeviceDiscoveryFragment when the user taps a device row.
-     * Initiates a Nearby connection; file is sent in onConnectionEstablished().
-     */
-    public void onDeviceSelectedForSend(DeviceInfo device) {
-        if (pendingFileUri == null || pendingFileMeta == null) return;
-        nearbyManager.connectToDevice(device.getEndpointId());
+    private String resolveFileName(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(
+                uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (i >= 0) return c.getString(i);
+            }
+        } catch (Exception ignored) {}
+        String seg = uri.getLastPathSegment();
+        return seg != null ? seg : "shared_file";
     }
 
-    // ── Receive flow (called by ReceiveModeFragment) ──────────────────────────
-
-    /** Start advertising + discovering so senders can find and connect to us. */
-    public void startReceiving() {
-        nearbyManager.startAdvertising();
-        nearbyManager.startDiscovery();
+    private String resolveMimeType(Uri uri) {
+        String type = getContentResolver().getType(uri);
+        return type != null ? type : "*/*";
     }
 
-    /** Stop all Nearby activity. */
-    public void stopReceiving() {
-        nearbyManager.stopAll();
+    private long resolveFileSize(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(
+                uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
+            }
+        } catch (Exception ignored) {}
+        return 0;
     }
 
-    // ── Permission handling ───────────────────────────────────────────────────
+    // ── Permissions ───────────────────────────────────────────────────────────
 
-    /**
-     * Build and request the permission set appropriate for this API level.
-     * Only requests permissions that haven't been granted yet.
-     */
     private void requestRequiredPermissions() {
         List<String> needed = new ArrayList<>();
         int sdk = Build.VERSION.SDK_INT;
 
-        if (sdk >= Build.VERSION_CODES.TIRAMISU) {           // API 33+
-            addIfNeeded(needed, Manifest.permission.NEARBY_WIFI_DEVICES);
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_SCAN);
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_ADVERTISE);
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_CONNECT);
-            addIfNeeded(needed, Manifest.permission.READ_MEDIA_IMAGES);
-            addIfNeeded(needed, Manifest.permission.READ_MEDIA_VIDEO);
-            addIfNeeded(needed, Manifest.permission.POST_NOTIFICATIONS);
-        } else if (sdk >= Build.VERSION_CODES.S) {           // API 31–32
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_SCAN);
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_ADVERTISE);
-            addIfNeeded(needed, Manifest.permission.BLUETOOTH_CONNECT);
-            addIfNeeded(needed, Manifest.permission.ACCESS_FINE_LOCATION);
-        } else {                                              // API 24–30
-            addIfNeeded(needed, Manifest.permission.ACCESS_FINE_LOCATION);
-            addIfNeeded(needed, Manifest.permission.READ_EXTERNAL_STORAGE);
-        }
-
-        if (!needed.isEmpty()) {
-            permissionLauncher.launch(needed.toArray(new String[0]));
-        }
-    }
-
-    private void addIfNeeded(List<String> list, String permission) {
-        if (ContextCompat.checkSelfPermission(this, permission)
-                != PackageManager.PERMISSION_GRANTED) {
-            list.add(permission);
-        }
-    }
-
-    // ── TransferEventBus.ConnectionListener ──────────────────────────────────
-
-    @Override
-    public void onDevicesUpdated(List<DeviceInfo> devices) {
-        // Callbacks from NearbyConnectionsManager already arrive on main thread
-        if (discoveryFragment != null && discoveryFragment.isAdded()) {
-            discoveryFragment.updateDeviceList(devices);
-        }
-    }
-
-    @Override
-    public void onConnectionEstablished(DeviceInfo device) {
-        Toast.makeText(this, "Connected to " + device.getDeviceName(), Toast.LENGTH_SHORT).show();
-        // Connection is ready — send the pending file
-        if (pendingFileUri != null && pendingFileMeta != null) {
-            nearbyManager.sendFile(device.getEndpointId(), pendingFileUri, pendingFileMeta);
-        }
-    }
-
-    @Override
-    public void onConnectionFailed(String reason) {
-        Toast.makeText(this, "Connection failed: " + reason, Toast.LENGTH_SHORT).show();
-        if (discoveryFragment != null && discoveryFragment.isAdded()) {
-            discoveryFragment.showTransferFailed(reason);
-        }
-    }
-
-    @Override
-    public void onDisconnected(String endpointId) {
-        Toast.makeText(this, "Disconnected", Toast.LENGTH_SHORT).show();
-    }
-
-    // ── TransferEventBus.TransferListener ────────────────────────────────────
-
-    @Override
-    public void onIncomingFile(FileMetadata meta, String fromDeviceName) {
-        String msg = "Receiving \"" + meta.getFileName() + "\" from " + fromDeviceName;
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-        if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-            receiveModeFragment.setStatusText("Receiving: " + meta.getFileName());
-        }
-    }
-
-    @Override
-    public void onTransferProgressUpdated(TransferProgress progress) {
-        String label = (progress.isSending() ? "Sending" : "Receiving")
-                + " " + progress.getFileName()
-                + " (" + progress.getProgressPercent() + "%)";
-
-        if (progress.isSending()) {
-            if (discoveryFragment != null && discoveryFragment.isAdded()) {
-                discoveryFragment.showTransferProgress(progress.getProgressPercent(), label);
-            }
+        if (sdk >= Build.VERSION_CODES.TIRAMISU) {
+            addIfMissing(needed, Manifest.permission.READ_MEDIA_IMAGES);
+            addIfMissing(needed, Manifest.permission.READ_MEDIA_VIDEO);
+            addIfMissing(needed, Manifest.permission.POST_NOTIFICATIONS);
         } else {
-            if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-                receiveModeFragment.setStatusText(label);
-            }
+            addIfMissing(needed, Manifest.permission.READ_EXTERNAL_STORAGE);
         }
+
+        if (!needed.isEmpty()) permissionLauncher.launch(needed.toArray(new String[0]));
     }
 
-    @Override
-    public void onTransferCompleted(TransferProgress finalProgress) {
-        if (finalProgress.isSending()) {
-            Toast.makeText(this, "Sent: " + finalProgress.getFileName(), Toast.LENGTH_SHORT).show();
-            if (discoveryFragment != null && discoveryFragment.isAdded()) {
-                discoveryFragment.showTransferComplete(finalProgress.getFileName());
-            }
-            // Return to Send mode after a brief moment
-            getSupportFragmentManager().popBackStack();
-            pendingFileUri  = null;
-            pendingFileMeta = null;
-            nearbyManager.stopDiscovery();
-        } else {
-            // Receiver side: FileTransferService will show a notification when saved
-            Toast.makeText(this, "File saved: " + finalProgress.getFileName(), Toast.LENGTH_LONG).show();
-            if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-                receiveModeFragment.setStatusText("Saved: " + finalProgress.getFileName());
-            }
-        }
-    }
-
-    @Override
-    public void onTransferFailed(String fileName, String error) {
-        Toast.makeText(this, "Transfer failed: " + error, Toast.LENGTH_SHORT).show();
-        if (discoveryFragment != null && discoveryFragment.isAdded()) {
-            discoveryFragment.showTransferFailed(error);
+    private void addIfMissing(List<String> list, String perm) {
+        if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+            list.add(perm);
         }
     }
 }

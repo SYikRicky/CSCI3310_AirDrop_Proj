@@ -7,27 +7,27 @@
     android:gravity="center_horizontal"
     android:padding="24dp">
 
-    <!-- Header -->
+    <!-- Back arrow / header -->
     <TextView
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/tab_send"
+        android:text="Upload to Drive"
         android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
-        android:layout_marginBottom="8dp" />
+        android:layout_marginBottom="6dp" />
 
     <TextView
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Pick a file to send to a nearby device"
+        android:text="Pick a file — it will be visible to everyone in the shared drive"
         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
         android:textColor="?android:attr/textColorSecondary"
-        android:layout_marginBottom="32dp" />
+        android:layout_marginBottom="28dp" />
 
-    <!-- Selected file card -->
+    <!-- Selected file preview -->
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp">
+        android:layout_marginBottom="20dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -63,12 +63,30 @@
         android:text="@string/btn_pick_file"
         android:layout_marginBottom="12dp" />
 
-    <!-- Find Devices button (enabled only after file is chosen) -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btn_find_devices"
-        style="@style/Widget.Material3.Button.OutlinedButton"
+    <!-- Upload progress -->
+    <ProgressBar
+        android:id="@+id/progress_upload"
+        style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/btn_find_devices" />
+        android:max="100"
+        android:layout_marginBottom="6dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tv_upload_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+        android:textColor="?colorPrimary"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone" />
+
+    <!-- Upload button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_find_devices"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/btn_upload" />
 
 </LinearLayout>
