@@ -1,3 +1,27 @@
 <resources>
-    <string name="app_name">CSCI3310_AirDrop_Proj</string>
+    <string name="app_name">DroidDrop</string>
+
+    <!-- Bottom navigation tabs -->
+    <string name="tab_send">Send</string>
+    <string name="tab_receive">Receive</string>
+
+    <!-- Send mode -->
+    <string name="btn_pick_file">Pick File</string>
+    <string name="btn_find_devices">Find Nearby Devices</string>
+
+    <!-- Receive mode -->
+    <string name="start_receiving">Start Receiving</string>
+    <string name="stop_receiving">Stop Receiving</string>
+    <string name="ready_to_receive">Discoverable — waiting for files…</string>
+    <string name="not_receiving">Not receiving</string>
+
+    <!-- Device discovery -->
+    <string name="no_devices_found">Searching for nearby devices…</string>
+
+    <!-- Transfer status -->
+    <string name="transfer_complete">Transfer complete</string>
+    <string name="transfer_failed">Transfer failed</string>
+
+    <!-- Permissions -->
+    <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
 </resources>
