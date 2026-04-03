@@ -40,6 +40,15 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/map_my_location" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_toggle_route"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="@string/map_show_route"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- OSMDroid MapView -->
