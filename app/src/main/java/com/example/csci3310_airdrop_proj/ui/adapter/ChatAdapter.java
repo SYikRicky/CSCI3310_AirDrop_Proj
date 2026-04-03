@@ -174,16 +174,11 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder
         }
 
         private void openInMaps(double lat, double lng) {
-            Uri geoUri = Uri.parse(String.format(Locale.US,
-                    "geo:%f,%f?q=%f,%f(Shared%%20Location)", lat, lng, lat, lng));
-            Intent intent = new Intent(Intent.ACTION_VIEW, geoUri);
-            try {
-                itemView.getContext().startActivity(intent);
-            } catch (ActivityNotFoundException e) {
-                Uri webUri = Uri.parse(String.format(Locale.US,
-                        "https://www.google.com/maps?q=%f,%f", lat, lng));
-                itemView.getContext().startActivity(new Intent(Intent.ACTION_VIEW, webUri));
-            }
+            Intent intent = new Intent(itemView.getContext(),
+                    com.example.csci3310_airdrop_proj.ui.MapActivity.class);
+            intent.putExtra(com.example.csci3310_airdrop_proj.ui.MapActivity.EXTRA_LAT, lat);
+            intent.putExtra(com.example.csci3310_airdrop_proj.ui.MapActivity.EXTRA_LNG, lng);
+            itemView.getContext().startActivity(intent);
         }
 
         private String formatSize(long bytes) {
