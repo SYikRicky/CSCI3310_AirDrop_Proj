@@ -34,6 +34,14 @@ public class TransferEventBus {
 
         /** Called when a connected endpoint disconnects. */
         void onDisconnected(String endpointId);
+
+        /**
+         * Called in chat mode when another device requests a connection to us.
+         * The UI should prompt the user to accept or reject via
+         * {@link com.example.csci3310_airdrop_proj.network.NearbyConnectionsManager#acceptChatInvitation}
+         * or {@link com.example.csci3310_airdrop_proj.network.NearbyConnectionsManager#rejectChatInvitation}.
+         */
+        void onChatInvitationReceived(String endpointId, String deviceName);
     }
 
     /**

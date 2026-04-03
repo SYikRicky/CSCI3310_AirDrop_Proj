@@ -15,6 +15,7 @@ public class ChatMessage {
     private final boolean outgoing;    // true = sent by this device
     private FileMetadata fileMetadata; // non-null for FILE type
     private int transferProgress;      // 0–100, used during active file transfer
+    private android.net.Uri savedUri;  // set after file is saved to device (received FILE only)
 
     public ChatMessage(Type type, String senderName, String text, long timestamp, boolean outgoing) {
         this.type = type;
@@ -35,4 +36,7 @@ public class ChatMessage {
 
     public int getTransferProgress()                        { return transferProgress; }
     public void setTransferProgress(int transferProgress)   { this.transferProgress = transferProgress; }
+
+    public android.net.Uri getSavedUri()                    { return savedUri; }
+    public void setSavedUri(android.net.Uri uri)            { this.savedUri = uri; }
 }

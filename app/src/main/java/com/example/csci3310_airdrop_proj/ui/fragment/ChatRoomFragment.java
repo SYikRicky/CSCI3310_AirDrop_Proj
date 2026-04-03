@@ -147,6 +147,14 @@ public class ChatRoomFragment extends Fragment {
         }
     }
 
+    /**
+     * Called when a received file has been saved to the device.
+     * Updates the matching message bubble to show an "Open File" button.
+     */
+    public void onFileSaved(Uri savedUri, String fileName, String mimeType) {
+        if (adapter != null) adapter.updateMessageUri(fileName, savedUri);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void openFilePicker() {
