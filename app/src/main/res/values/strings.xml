@@ -57,6 +57,12 @@
     <string name="location_unavailable">Cannot get current location</string>
     <string name="location_permission_needed">Location permission is required to share your position</string>
 
+    <!-- Map -->
+    <string name="tab_map">Map</string>
+    <string name="map_title">Offline Map</string>
+    <string name="map_back">Back</string>
+    <string name="map_my_location">My Location</string>
+
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
 </resources>

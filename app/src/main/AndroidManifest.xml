@@ -99,6 +99,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Offline map (OSMDroid) -->
+        <activity
+            android:name=".ui.MapActivity"
+            android:exported="false" />
+
         <!-- Foreground service that saves received files to Downloads -->
         <service
             android:name=".service.FileTransferService"
