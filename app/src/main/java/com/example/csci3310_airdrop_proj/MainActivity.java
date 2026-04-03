@@ -149,35 +149,37 @@ public class MainActivity extends AppCompatActivity {
                 new SharedDriveRepository.UploadCallback() {
                     @Override
                     public void onProgress(int percent) {
-                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
-                            sendModeFragment.onUploadProgress(percent);
-                        }
+                        runOnUiThread(() -> {
+                            if (sendModeFragment != null && sendModeFragment.isAdded()) {
+                                sendModeFragment.onUploadProgress(percent);
+                            }
+                        });
                     }
 
                     @Override
                     public void onSuccess(SharedFile file) {
-                        Toast.makeText(MainActivity.this,
-                                "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
-                        // Update fragment UI if it is still on screen
-                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
-                            sendModeFragment.onUploadSuccess();
-                        }
-                        sendModeFragment = null;
-                        // Always navigate back — do it here so it runs even if
-                        // the fragment's isAdded() check above returned false.
-                        new android.os.Handler(android.os.Looper.getMainLooper())
-                                .postDelayed(() ->
-                                        getSupportFragmentManager().popBackStack(),
-                                        800);
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                            sendModeFragment = null;
+                            // Navigate directly to FileListFragment — popBackStack was unreliable
+                            getSupportFragmentManager()
+                                    .beginTransaction()
+                                    .replace(R.id.fragment_container,
+                                            new FileListFragment(), FileListFragment.TAG)
+                                    .commit();
+                        });
                     }
 
                     @Override
                     public void onFailure(Exception e) {
-                        Toast.makeText(MainActivity.this,
-                                "Upload failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        if (sendModeFragment != null && sendModeFragment.isAdded()) {
-                            sendModeFragment.onUploadFailure(e.getMessage());
-                        }
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Upload failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            if (sendModeFragment != null && sendModeFragment.isAdded()) {
+                                sendModeFragment.onUploadFailure(e.getMessage());
+                            }
+                        });
                     }
                 });
     }
