@@ -67,5 +67,9 @@ public class TransferEventBus {
     public interface ChatListener {
         /** Called when a text message is received from a connected device. */
         void onChatMessageReceived(String endpointId, String senderName, String text, long timestamp);
+
+        /** Called when a GPS location message is received from a connected device. */
+        void onLocationMessageReceived(String endpointId, String senderName,
+                                       double latitude, double longitude, long timestamp);
     }
 }

@@ -88,17 +88,19 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder
 
         private final TextView tvMessage;
         private final TextView tvTimestamp;
-        private final TextView tvSender;   // only in received layout
+        private final TextView tvSender;    // only in received layout
         private final View     btnOpenFile; // only in received layout
+        private final View     btnOpenMap;  // in both layouts
         private final int      viewType;
 
         ChatViewHolder(@NonNull View itemView, int viewType) {
             super(itemView);
             this.viewType = viewType;
-            tvMessage  = itemView.findViewById(R.id.tv_message);
-            tvTimestamp = itemView.findViewById(R.id.tv_timestamp);
-            tvSender   = itemView.findViewById(R.id.tv_sender);
+            tvMessage   = itemView.findViewById(R.id.tv_message);
+            tvTimestamp  = itemView.findViewById(R.id.tv_timestamp);
+            tvSender    = itemView.findViewById(R.id.tv_sender);
             btnOpenFile = itemView.findViewById(R.id.btn_open_file);
+            btnOpenMap  = itemView.findViewById(R.id.btn_open_map);
         }
 
         void bind(ChatMessage msg) {
@@ -107,10 +109,14 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder
                 String fileName = msg.getText();
                 if (msg.getFileMetadata() != null) {
                     long size = msg.getFileMetadata().getFileSize();
-                    displayText = "📎 " + fileName + " (" + formatSize(size) + ")";
+                    displayText = "\uD83D\uDCCE " + fileName + " (" + formatSize(size) + ")";
                 } else {
-                    displayText = "📎 " + fileName;
+                    displayText = "\uD83D\uDCCE " + fileName;
                 }
+            } else if (msg.getType() == ChatMessage.Type.LOCATION) {
+                displayText = "\uD83D\uDCCD " + itemView.getContext().getString(R.string.location_shared)
+                        + "\n" + String.format(Locale.US, "%.6f, %.6f",
+                        msg.getLatitude(), msg.getLongitude());
             } else {
                 displayText = msg.getText();
             }
@@ -134,6 +140,16 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder
                     btnOpenFile.setVisibility(View.GONE);
                 }
             }
+
+            // Show "Open in Maps" button for LOCATION messages
+            if (btnOpenMap != null) {
+                if (msg.getType() == ChatMessage.Type.LOCATION) {
+                    btnOpenMap.setVisibility(View.VISIBLE);
+                    btnOpenMap.setOnClickListener(v -> openInMaps(msg.getLatitude(), msg.getLongitude()));
+                } else {
+                    btnOpenMap.setVisibility(View.GONE);
+                }
+            }
         }
 
         private void openFile(Uri uri, String mimeType) {
@@ -154,6 +170,19 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder
             } catch (ActivityNotFoundException e) {
                 Toast.makeText(itemView.getContext(),
                         R.string.no_app_for_file, Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        private void openInMaps(double lat, double lng) {
+            Uri geoUri = Uri.parse(String.format(Locale.US,
+                    "geo:%f,%f?q=%f,%f(Shared%%20Location)", lat, lng, lat, lng));
+            Intent intent = new Intent(Intent.ACTION_VIEW, geoUri);
+            try {
+                itemView.getContext().startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                Uri webUri = Uri.parse(String.format(Locale.US,
+                        "https://www.google.com/maps?q=%f,%f", lat, lng));
+                itemView.getContext().startActivity(new Intent(Intent.ACTION_VIEW, webUri));
             }
         }
 

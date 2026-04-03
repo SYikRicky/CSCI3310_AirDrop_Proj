@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.nearby.connections)
     implementation(libs.fragment)
     implementation(libs.lifecycle.service)
+    implementation(libs.play.services.location)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)

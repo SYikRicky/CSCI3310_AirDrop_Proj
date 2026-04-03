@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -15,6 +16,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 
 import com.example.csci3310_airdrop_proj.model.DeviceInfo;
 import com.example.csci3310_airdrop_proj.model.FileMetadata;
@@ -56,8 +61,13 @@ public class MainActivity extends AppCompatActivity
                    TransferEventBus.ChatListener,
                    FileTransferService.OnFileSavedCallback {
 
+    private static final String TAG = "MainActivity";
+
     // ── Network ──────────────────────────────────────────────────────────────
     private NearbyConnectionsManager nearbyManager;
+
+    // ── Location ──────────────────────────────────────────────────────────────
+    private FusedLocationProviderClient fusedLocationClient;
 
     // ── Device identity ───────────────────────────────────────────────────────
     private String localDeviceName;
@@ -103,6 +113,7 @@ public class MainActivity extends AppCompatActivity
 
         localDeviceName = initDeviceName();
         chatHistoryManager = new ChatHistoryManager(this);
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
         // Initialise NearbyConnectionsManager and register this Activity as listener
         nearbyManager = new NearbyConnectionsManager(this);
@@ -332,6 +343,40 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    /** Called by ChatRoomFragment when the user taps the location button. */
+    @SuppressWarnings("MissingPermission")
+    public void onChatSendLocation(String endpointId) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, R.string.location_permission_needed, Toast.LENGTH_SHORT).show();
+            permissionLauncher.launch(new String[]{Manifest.permission.ACCESS_FINE_LOCATION});
+            return;
+        }
+
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener(this, location -> {
+                    if (location == null) {
+                        Toast.makeText(this, R.string.location_unavailable, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    double lat = location.getLatitude();
+                    double lng = location.getLongitude();
+
+                    nearbyManager.sendLocationMessage(endpointId, localDeviceName, lat, lng);
+
+                    ChatMessage msg = ChatMessage.createLocation(
+                            localDeviceName, lat, lng, System.currentTimeMillis(), true);
+                    addToChatHistory(endpointId, msg);
+                    if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
+                        chatRoomFragment.addMessage(msg);
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Log.w(TAG, "Location fetch failed", e);
+                    Toast.makeText(this, R.string.location_unavailable, Toast.LENGTH_SHORT).show();
+                });
+    }
+
     private void addToChatHistory(String endpointId, ChatMessage msg) {
         String deviceName = endpointToDeviceName.getOrDefault(endpointId, endpointId);
         chatHistoryManager.saveMessage(deviceName, msg);
@@ -394,6 +439,7 @@ public class MainActivity extends AppCompatActivity
             addIfNeeded(needed, Manifest.permission.READ_MEDIA_IMAGES);
             addIfNeeded(needed, Manifest.permission.READ_MEDIA_VIDEO);
             addIfNeeded(needed, Manifest.permission.POST_NOTIFICATIONS);
+            addIfNeeded(needed, Manifest.permission.ACCESS_FINE_LOCATION);
         } else if (sdk >= Build.VERSION_CODES.S) {           // API 31–32
             addIfNeeded(needed, Manifest.permission.BLUETOOTH_SCAN);
             addIfNeeded(needed, Manifest.permission.BLUETOOTH_ADVERTISE);
@@ -555,7 +601,6 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onChatMessageReceived(String endpointId, String senderName, String text, long timestamp) {
-        // Keep device name mapping up-to-date (senderName comes from the wire message)
         endpointToDeviceName.put(endpointId, senderName);
         ChatMessage msg = new ChatMessage(ChatMessage.Type.TEXT, senderName, text, timestamp, false);
         addToChatHistory(endpointId, msg);
@@ -565,6 +610,21 @@ public class MainActivity extends AppCompatActivity
             chatRoomFragment.addMessage(msg);
         } else {
             Toast.makeText(this, senderName + ": " + text, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    public void onLocationMessageReceived(String endpointId, String senderName,
+                                          double latitude, double longitude, long timestamp) {
+        endpointToDeviceName.put(endpointId, senderName);
+        ChatMessage msg = ChatMessage.createLocation(senderName, latitude, longitude, timestamp, false);
+        addToChatHistory(endpointId, msg);
+
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()
+                && endpointId.equals(activeChatEndpointId)) {
+            chatRoomFragment.addMessage(msg);
+        } else {
+            Toast.makeText(this, senderName + " shared a location", Toast.LENGTH_SHORT).show();
         }
     }
 }

@@ -92,6 +92,7 @@ public class ChatRoomFragment extends Fragment {
         etMessage = view.findViewById(R.id.et_message);
         ImageButton btnSend = view.findViewById(R.id.btn_send);
         ImageButton btnAttach = view.findViewById(R.id.btn_attach);
+        ImageButton btnLocation = view.findViewById(R.id.btn_location);
 
         tvDeviceName.setText(deviceName != null ? deviceName : "Unknown Device");
 
@@ -115,6 +116,13 @@ public class ChatRoomFragment extends Fragment {
 
         // Attach file
         btnAttach.setOnClickListener(v -> openFilePicker());
+
+        // Share GPS location
+        btnLocation.setOnClickListener(v -> {
+            if (endpointId != null) {
+                ((MainActivity) requireActivity()).onChatSendLocation(endpointId);
+            }
+        });
     }
 
     // ── Public API called by MainActivity ─────────────────────────────────────
