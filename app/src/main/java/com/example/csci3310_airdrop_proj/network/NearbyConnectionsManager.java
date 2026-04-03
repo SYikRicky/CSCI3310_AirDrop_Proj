@@ -246,6 +246,20 @@ public class NearbyConnectionsManager {
     }
 
     /**
+     * Send a GPS location to a connected endpoint.
+     * Wire format: "LOCATION|senderName|timestamp|lat|lng"
+     */
+    public void sendLocationMessage(String endpointId, String senderName,
+                                    double latitude, double longitude) {
+        long timestamp = System.currentTimeMillis();
+        String wire = "LOCATION|" + senderName + "|" + timestamp + "|"
+                + latitude + "|" + longitude;
+        Payload payload = Payload.fromBytes(wire.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        connectionsClient.sendPayload(endpointId, payload)
+                .addOnFailureListener(e -> Log.w(TAG, "Location message failed: " + e.getMessage()));
+    }
+
+    /**
      * Send a file within a chat session. Same as sendFile but keeps the chat connection alive.
      */
     public void sendFileInChat(String endpointId, Uri fileUri, FileMetadata metadata) {
@@ -410,6 +424,27 @@ public class NearbyConnectionsManager {
                                 if (chatListener != null)
                                     chatListener.onChatMessageReceived(endpointId, senderName, text, timestamp);
                             });
+                        }
+                    } else if (raw.startsWith("LOCATION|")) {
+                        // GPS location: "LOCATION|senderName|timestamp|lat|lng"
+                        String[] parts = raw.split("\\|", 5);
+                        if (parts.length == 5) {
+                            String senderName = parts[1];
+                            long parsedTime;
+                            try { parsedTime = Long.parseLong(parts[2]); }
+                            catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
+                            final long timestamp = parsedTime;
+                            try {
+                                final double lat = Double.parseDouble(parts[3]);
+                                final double lng = Double.parseDouble(parts[4]);
+                                notifyMain(() -> {
+                                    if (chatListener != null)
+                                        chatListener.onLocationMessageReceived(
+                                                endpointId, senderName, lat, lng, timestamp);
+                                });
+                            } catch (NumberFormatException e) {
+                                Log.w(TAG, "Invalid location payload: " + raw);
+                            }
                         }
                     } else {
                         // File metadata: "FILE|fileName|mimeType|fileSize" or legacy "fileName|mimeType|fileSize"
