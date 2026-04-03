@@ -108,7 +108,11 @@ public class SendModeFragment extends Fragment {
         progressBar.setVisibility(View.VISIBLE);
         tvStatus.setVisibility(View.VISIBLE);
         progressBar.setProgress(percent);
-        tvStatus.setText(getString(R.string.uploading) + " " + percent + "%");
+        if (percent >= 100) {
+            tvStatus.setText(R.string.saving_metadata); // Storage done, writing to Firestore
+        } else {
+            tvStatus.setText(getString(R.string.uploading) + " " + percent + "%");
+        }
         btnUpload.setEnabled(false);
     }
 
