@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Toolbar -->
+        <com.google.android.material.appbar.MaterialToolbar
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?colorPrimary"
+            app:title="@string/app_name"
+            app:titleTextColor="@color/white" />
+
+        <!-- Empty state -->
+        <TextView
+            android:id="@+id/tv_empty_files"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/no_files_yet"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            android:gravity="center"
+            android:padding="48dp"
+            android:visibility="gone" />
+
+        <!-- Shared file list -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_files"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="88dp" />
+
+    </LinearLayout>
+
+    <!-- FAB: upload a file -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab_upload"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:contentDescription="Upload file"
+        app:srcCompat="@android:drawable/ic_menu_upload" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

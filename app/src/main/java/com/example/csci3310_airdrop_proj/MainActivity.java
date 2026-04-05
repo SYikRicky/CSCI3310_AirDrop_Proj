@@ -39,6 +39,11 @@ import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.WalkieTalkieFragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
+// Shared Drive (Firebase)
+import com.example.csci3310_airdrop_proj.model.SharedFile;
+import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
+import com.example.csci3310_airdrop_proj.ui.fragment.FileListFragment;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -94,6 +99,24 @@ public class MainActivity extends AppCompatActivity
     /** Persistent storage for chat history across app restarts. */
     private ChatHistoryManager chatHistoryManager;
 
+    // ── Shared Drive (Firebase) ───────────────────────────────────────────────
+    private SharedDriveRepository repository;
+    private SendModeFragment      sendModeFragment;
+    private final ActivityResultLauncher<Intent> filePickerLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri uri = result.getData().getData();
+                            if (uri != null) {
+                                getContentResolver().takePersistableUriPermission(
+                                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                navigateToDriveUpload(uri, resolveFileName(uri),
+                                        resolveMimeType(uri), resolveFileSize(uri));
+                            }
+                        }
+                    });
+
     // ── Permission launcher ───────────────────────────────────────────────────
     private final ActivityResultLauncher<String[]> permissionLauncher =
             registerForActivityResult(
@@ -117,6 +140,9 @@ public class MainActivity extends AppCompatActivity
         localDeviceName = initDeviceName();
         chatHistoryManager = new ChatHistoryManager(this);
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+
+        // Initialise Firebase shared drive repository
+        repository = new SharedDriveRepository();
 
         // Initialise NearbyConnectionsManager and register this Activity as listener
         nearbyManager = new NearbyConnectionsManager(this);
@@ -652,5 +678,124 @@ public class MainActivity extends AppCompatActivity
         } else {
             Toast.makeText(this, senderName + " shared a location", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ── Shared Drive public API (called by FileListFragment / SendModeFragment) ──
+
+    public SharedDriveRepository getRepository() { return repository; }
+
+    public void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        filePickerLauncher.launch(intent);
+    }
+
+    private void navigateToDriveUpload(Uri uri, String fileName, String mimeType, long size) {
+        sendModeFragment = new SendModeFragment();
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container, sendModeFragment, "upload")
+                .addToBackStack("upload")
+                .commit();
+        getSupportFragmentManager().executePendingTransactions();
+        if (sendModeFragment.getView() != null) {
+            sendModeFragment.setPreselectedFile(uri, fileName, mimeType, size);
+        } else {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    sendModeFragment.setPreselectedFile(uri, fileName, mimeType, size));
+        }
+    }
+
+    public void uploadFile(Uri uri, String fileName, String mimeType, long fileSize) {
+        repository.uploadFile(uri, fileName, mimeType, fileSize,
+                getContentResolver(),
+                new SharedDriveRepository.UploadCallback() {
+                    @Override public void onProgress(int percent) {
+                        runOnUiThread(() -> {
+                            if (sendModeFragment != null && sendModeFragment.isAdded())
+                                sendModeFragment.onUploadProgress(percent);
+                        });
+                    }
+                    @Override public void onSuccess(SharedFile file) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                            sendModeFragment = null;
+                            getSupportFragmentManager()
+                                    .beginTransaction()
+                                    .replace(R.id.fragment_container,
+                                            new FileListFragment(), FileListFragment.TAG)
+                                    .commitAllowingStateLoss();
+                        });
+                    }
+                    @Override public void onFailure(Exception e) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Upload failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            if (sendModeFragment != null && sendModeFragment.isAdded())
+                                sendModeFragment.onUploadFailure(e.getMessage());
+                        });
+                    }
+                });
+    }
+
+    public void previewFile(SharedFile file) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.parse(file.getDownloadUrl()),
+                file.getMimeType() != null ? file.getMimeType() : "*/*");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No app found to open this file type", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    public void downloadFile(SharedFile file) {
+        Intent intent = new Intent(this, FileTransferService.class);
+        intent.putExtra(FileTransferService.EXTRA_FILE_METADATA, file.getFileName());
+        intent.putExtra(FileTransferService.EXTRA_TEMP_FILE_PATH, file.getDownloadUrl());
+        ContextCompat.startForegroundService(this, intent);
+        Toast.makeText(this, "Downloading: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+    }
+
+    public void deleteFile(SharedFile file) {
+        repository.deleteFile(file, new SharedDriveRepository.DeleteCallback() {
+            @Override public void onSuccess() {
+                Toast.makeText(MainActivity.this,
+                        "Deleted: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+            }
+            @Override public void onFailure(Exception e) {
+                Toast.makeText(MainActivity.this,
+                        "Delete failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private String resolveFileName(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (i >= 0) return c.getString(i);
+            }
+        } catch (Exception ignored) {}
+        String seg = uri.getLastPathSegment();
+        return seg != null ? seg : "file";
+    }
+
+    private String resolveMimeType(Uri uri) {
+        String type = getContentResolver().getType(uri);
+        return type != null ? type : "*/*";
+    }
+
+    private long resolveFileSize(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
+            }
+        } catch (Exception ignored) {}
+        return 0;
     }
 }
