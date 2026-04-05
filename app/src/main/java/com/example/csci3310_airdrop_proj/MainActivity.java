@@ -33,10 +33,14 @@ import com.example.csci3310_airdrop_proj.service.FileTransferService;
 import com.example.csci3310_airdrop_proj.ui.fragment.ChatDeviceListFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.ChatRoomFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.DeviceDiscoveryFragment;
-import com.example.csci3310_airdrop_proj.ui.fragment.ReceiveModeFragment;
 import com.example.csci3310_airdrop_proj.ui.MapActivity;
 import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+
+// Shared Drive (Firebase)
+import com.example.csci3310_airdrop_proj.model.SharedFile;
+import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
+import com.example.csci3310_airdrop_proj.ui.fragment.FileListFragment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -61,7 +65,8 @@ public class MainActivity extends AppCompatActivity
         implements TransferEventBus.ConnectionListener,
                    TransferEventBus.TransferListener,
                    TransferEventBus.ChatListener,
-                   FileTransferService.OnFileSavedCallback {
+                   FileTransferService.OnFileSavedCallback,
+                   NearbyConnectionsManager.ChatFileReceivedCallback {
 
     private static final String TAG = "MainActivity";
 
@@ -81,7 +86,6 @@ public class MainActivity extends AppCompatActivity
 
     // ── Fragment references ──────────────────────────────────────────────────
     private DeviceDiscoveryFragment discoveryFragment;
-    private ReceiveModeFragment     receiveModeFragment;
     private ChatDeviceListFragment  chatDeviceListFragment;
     private ChatRoomFragment        chatRoomFragment;
 
@@ -92,6 +96,24 @@ public class MainActivity extends AppCompatActivity
     private final Map<String, String> endpointToDeviceName = new HashMap<>();
     /** Persistent storage for chat history across app restarts. */
     private ChatHistoryManager chatHistoryManager;
+
+    // ── Shared Drive (Firebase) ───────────────────────────────────────────────
+    private SharedDriveRepository repository;
+    private SendModeFragment      sendModeFragment;
+    private final ActivityResultLauncher<Intent> filePickerLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri uri = result.getData().getData();
+                            if (uri != null) {
+                                getContentResolver().takePersistableUriPermission(
+                                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                navigateToDriveUpload(uri, resolveFileName(uri),
+                                        resolveMimeType(uri), resolveFileSize(uri));
+                            }
+                        }
+                    });
 
     // ── Permission launcher ───────────────────────────────────────────────────
     private final ActivityResultLauncher<String[]> permissionLauncher =
@@ -117,19 +139,23 @@ public class MainActivity extends AppCompatActivity
         chatHistoryManager = new ChatHistoryManager(this);
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
+        // Initialise Firebase shared drive repository
+        repository = new SharedDriveRepository();
+
         // Initialise NearbyConnectionsManager and register this Activity as listener
         nearbyManager = new NearbyConnectionsManager(this);
         nearbyManager.setLocalDeviceName(localDeviceName);
         nearbyManager.setConnectionListener(this);
         nearbyManager.setTransferListener(this);
         nearbyManager.setChatListener(this);
+        NearbyConnectionsManager.setChatFileCallback(this);
 
         setupBottomNavigation();
         requestRequiredPermissions();
 
-        // Show Send mode by default on first launch
+        // Show Drive mode by default on first launch
         if (savedInstanceState == null) {
-            showSendMode();
+            showDriveMode();
         }
     }
 
@@ -147,20 +173,35 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        NearbyConnectionsManager.setChatFileCallback(null);
         // Clean up all Nearby Connections state to avoid leaking resources
         nearbyManager.stopAll();
+        super.onDestroy();
     }
 
     // ── FileTransferService.OnFileSavedCallback ───────────────────────────────
 
     @Override
     public void onFileSaved(android.net.Uri savedUri, String fileName, String mimeType) {
-        if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-            receiveModeFragment.showFileReceived(savedUri, fileName, mimeType);
-        }
         if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
             chatRoomFragment.onFileSaved(savedUri, fileName, mimeType);
+        }
+    }
+
+    // ── NearbyConnectionsManager.ChatFileReceivedCallback ────────────────────
+
+    /** Called on the main thread when a received chat file has been copied to cache. */
+    @Override
+    public void onChatFileReceived(android.net.Uri uri, FileMetadata meta) {
+        // Update the live chat bubble (if open)
+        if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
+            chatRoomFragment.onFileSaved(uri, meta.getFileName(), meta.getMimeType());
+        }
+        // Persist the URI so the thumbnail / Play button survives reopening the chat
+        if (activeChatEndpointId != null) {
+            String deviceName = endpointToDeviceName.getOrDefault(
+                    activeChatEndpointId, activeChatEndpointId);
+            chatHistoryManager.updateFileUri(deviceName, meta.getFileName(), uri);
         }
     }
 
@@ -170,11 +211,8 @@ public class MainActivity extends AppCompatActivity
         BottomNavigationView bottomNav = findViewById(R.id.bottom_nav);
         bottomNav.setOnItemSelectedListener(item -> {
             int id = item.getItemId();
-            if (id == R.id.nav_send) {
-                showSendMode();
-                return true;
-            } else if (id == R.id.nav_receive) {
-                showReceiveMode();
+            if (id == R.id.nav_drive) {
+                showDriveMode();
                 return true;
             } else if (id == R.id.nav_chat) {
                 showChatMode();
@@ -187,22 +225,13 @@ public class MainActivity extends AppCompatActivity
         });
     }
 
-    private void showSendMode() {
+    private void showDriveMode() {
         nearbyManager.setChatMode(false);
-        // Stop any active discovery when switching away from send mode
         nearbyManager.stopDiscovery();
         pendingFileUri  = null;
         pendingFileMeta = null;
-        // Clear back stack and show fresh SendModeFragment
         getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
-        replaceFragment(new SendModeFragment(), "send");
-    }
-
-    private void showReceiveMode() {
-        nearbyManager.setChatMode(false);
-        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
-        receiveModeFragment = new ReceiveModeFragment();
-        replaceFragment(receiveModeFragment, "receive");
+        replaceFragment(new FileListFragment(), FileListFragment.TAG);
     }
 
     private void replaceFragment(Fragment fragment, String tag) {
@@ -248,19 +277,6 @@ public class MainActivity extends AppCompatActivity
     public void onDeviceSelectedForSend(DeviceInfo device) {
         if (pendingFileUri == null || pendingFileMeta == null) return;
         nearbyManager.connectToDevice(device.getEndpointId());
-    }
-
-    // ── Receive flow (called by ReceiveModeFragment) ──────────────────────────
-
-    /** Start advertising + discovering so senders can find and connect to us. */
-    public void startReceiving() {
-        nearbyManager.startAdvertising();
-        nearbyManager.startDiscovery();
-    }
-
-    /** Stop all Nearby activity. */
-    public void stopReceiving() {
-        nearbyManager.stopAll();
     }
 
     // ── Chat flow ─────────────────────────────────────────────────────────────
@@ -343,13 +359,15 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    /** Called by ChatRoomFragment to send a file. */
+    /** Called by ChatRoomFragment to send a file or voice message. */
     public void onChatSendFile(String endpointId, Uri fileUri, FileMetadata metadata) {
         nearbyManager.sendFileInChat(endpointId, fileUri, metadata);
         ChatMessage msg = new ChatMessage(
                 ChatMessage.Type.FILE, localDeviceName, metadata.getFileName(),
                 System.currentTimeMillis(), true);
         msg.setFileMetadata(metadata);
+        // Store the URI so the sender can immediately play back voice messages
+        msg.setSavedUri(fileUri);
         addToChatHistory(endpointId, msg);
         if (chatRoomFragment != null && chatRoomFragment.isAdded()) {
             chatRoomFragment.addMessage(msg);
@@ -548,9 +566,6 @@ public class MainActivity extends AppCompatActivity
     public void onIncomingFile(FileMetadata meta, String fromDeviceName) {
         String text = "Receiving \"" + meta.getFileName() + "\" from " + fromDeviceName;
         Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
-        if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-            receiveModeFragment.setStatusText("Receiving: " + meta.getFileName());
-        }
         // Show file message in chat if active
         if (chatRoomFragment != null && chatRoomFragment.isAdded()
                 && activeChatEndpointId != null) {
@@ -574,10 +589,6 @@ public class MainActivity extends AppCompatActivity
             if (discoveryFragment != null && discoveryFragment.isAdded()) {
                 discoveryFragment.showTransferProgress(progress.getProgressPercent(), label);
             }
-        } else {
-            if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-                receiveModeFragment.setStatusText(label);
-            }
         }
     }
 
@@ -596,9 +607,6 @@ public class MainActivity extends AppCompatActivity
             // In chat mode, don't pop — stay in the chatroom
         } else {
             Toast.makeText(this, "File saved: " + finalProgress.getFileName(), Toast.LENGTH_LONG).show();
-            if (receiveModeFragment != null && receiveModeFragment.isAdded()) {
-                receiveModeFragment.setStatusText("Saved: " + finalProgress.getFileName());
-            }
         }
     }
 
@@ -639,5 +647,138 @@ public class MainActivity extends AppCompatActivity
         } else {
             Toast.makeText(this, senderName + " shared a location", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    // ── Shared Drive public API (called by FileListFragment / SendModeFragment) ──
+
+    public SharedDriveRepository getRepository() { return repository; }
+
+    public void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        filePickerLauncher.launch(intent);
+    }
+
+    private void navigateToDriveUpload(Uri uri, String fileName, String mimeType, long size) {
+        sendModeFragment = new SendModeFragment();
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container, sendModeFragment, "upload")
+                .addToBackStack("upload")
+                .commit();
+        getSupportFragmentManager().executePendingTransactions();
+        if (sendModeFragment.getView() != null) {
+            sendModeFragment.setPreselectedFile(uri, fileName, mimeType, size);
+        } else {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    sendModeFragment.setPreselectedFile(uri, fileName, mimeType, size));
+        }
+    }
+
+    public void uploadFile(Uri uri, String fileName, String mimeType, long fileSize) {
+        repository.uploadFile(uri, fileName, mimeType, fileSize,
+                getContentResolver(),
+                new SharedDriveRepository.UploadCallback() {
+                    @Override public void onProgress(int percent) {
+                        runOnUiThread(() -> {
+                            if (sendModeFragment != null && sendModeFragment.isAdded())
+                                sendModeFragment.onUploadProgress(percent);
+                        });
+                    }
+                    @Override public void onSuccess(SharedFile file) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Uploaded: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+                            sendModeFragment = null;
+                            getSupportFragmentManager()
+                                    .beginTransaction()
+                                    .replace(R.id.fragment_container,
+                                            new FileListFragment(), FileListFragment.TAG)
+                                    .commitAllowingStateLoss();
+                        });
+                    }
+                    @Override public void onFailure(Exception e) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this,
+                                    "Upload failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            if (sendModeFragment != null && sendModeFragment.isAdded())
+                                sendModeFragment.onUploadFailure(e.getMessage());
+                        });
+                    }
+                });
+    }
+
+    public void previewFile(SharedFile file) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.parse(file.getDownloadUrl()),
+                file.getMimeType() != null ? file.getMimeType() : "*/*");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No app found to open this file type", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    public void downloadFile(SharedFile file) {
+        try {
+            android.app.DownloadManager.Request request =
+                    new android.app.DownloadManager.Request(Uri.parse(file.getDownloadUrl()))
+                            .setTitle(file.getFileName())
+                            .setDescription("Downloading from DroidDrive")
+                            .setNotificationVisibility(
+                                    android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            .setDestinationInExternalPublicDir(
+                                    android.os.Environment.DIRECTORY_DOWNLOADS, file.getFileName())
+                            .setMimeType(file.getMimeType() != null ? file.getMimeType() : "*/*");
+            android.app.DownloadManager dm =
+                    (android.app.DownloadManager) getSystemService(android.content.Context.DOWNLOAD_SERVICE);
+            if (dm != null) {
+                dm.enqueue(request);
+                Toast.makeText(this, "Downloading: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Download failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    public void deleteFile(SharedFile file) {
+        repository.deleteFile(file, new SharedDriveRepository.DeleteCallback() {
+            @Override public void onSuccess() {
+                Toast.makeText(MainActivity.this,
+                        "Deleted: " + file.getFileName(), Toast.LENGTH_SHORT).show();
+            }
+            @Override public void onFailure(Exception e) {
+                Toast.makeText(MainActivity.this,
+                        "Delete failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private String resolveFileName(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (i >= 0) return c.getString(i);
+            }
+        } catch (Exception ignored) {}
+        String seg = uri.getLastPathSegment();
+        return seg != null ? seg : "file";
+    }
+
+    private String resolveMimeType(Uri uri) {
+        String type = getContentResolver().getType(uri);
+        return type != null ? type : "*/*";
+    }
+
+    private long resolveFileSize(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int i = c.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                if (i >= 0 && !c.isNull(i)) return c.getLong(i);
+            }
+        } catch (Exception ignored) {}
+        return 0;
     }
 }

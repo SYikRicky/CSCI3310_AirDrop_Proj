@@ -1,15 +1,30 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
+# Built outputs
 /build
-/captures
+app/build
+**/build/
+
+# Gradle
+.gradle
+**/gradle/wrapper/gradle-wrapper.jar
+
+# Local config (machine-specific, never commit)
+local.properties
+*.iml
+
+# Android Studio / IntelliJ IDEA
+# Only keep vcs.xml — everything else is machine-specific
+.idea/
+!.idea/vcs.xml
+
+# macOS
+.DS_Store
+
+# Native build
 .externalNativeBuild
 .cxx
-local.properties
+
+# Captures / profiling
+/captures
+
+# Claude Code local data
+.claude/

@@ -47,6 +47,16 @@
                 android:alpha="0.7"
                 android:layout_marginTop="2dp" />
 
+            <ImageView
+                android:id="@+id/iv_image_preview"
+                android:layout_width="200dp"
+                android:layout_height="160dp"
+                android:layout_marginTop="6dp"
+                android:scaleType="centerCrop"
+                android:adjustViewBounds="true"
+                android:visibility="gone"
+                android:contentDescription="@string/chat_image_preview" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_open_file"
                 style="@style/Widget.Material3.Button.TonalButton"
@@ -63,6 +73,15 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="@string/btn_open_map"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_play_voice"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/chat_play_voice"
                 android:visibility="gone" />
 
         </LinearLayout>

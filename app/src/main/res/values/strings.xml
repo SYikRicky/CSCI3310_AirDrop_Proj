@@ -1,25 +1,29 @@
 <resources>
-    <string name="app_name">DroidDrop</string>
+    <string name="app_name">DroidDrive</string>
 
     <!-- Bottom navigation tabs -->
-    <string name="tab_send">Send</string>
-    <string name="tab_receive">Receive</string>
+    <string name="tab_drive">Drive</string>
 
-    <!-- Send mode -->
+    <!-- File list (shared drive) -->
+    <string name="no_files_yet">No files yet.\nTap + to upload the first one!</string>
+    <string name="drive_load_error">Could not load files. Check your internet connection.</string>
+
+    <!-- Upload -->
     <string name="btn_pick_file">Pick File</string>
-    <string name="btn_find_devices">Find Nearby Devices</string>
+    <string name="btn_upload">Upload to Drive</string>
+    <string name="uploading">Uploading…</string>
+    <string name="saving_metadata">Saving to drive…</string>
+    <string name="upload_success">Upload complete!</string>
+    <string name="upload_failed">Upload failed</string>
 
-    <!-- Receive mode -->
+    <!-- Receive mode (kept for future use) -->
     <string name="start_receiving">Start Receiving</string>
     <string name="stop_receiving">Stop Receiving</string>
     <string name="ready_to_receive">Discoverable — waiting for files…</string>
     <string name="not_receiving">Not receiving</string>
 
-    <!-- Device discovery -->
-    <string name="no_devices_found">Searching for nearby devices…</string>
-
     <!-- Transfer status -->
-    <string name="transfer_complete">Transfer complete</string>
+    <string name="transfer_complete">Saved to Downloads</string>
     <string name="transfer_failed">Transfer failed</string>
 
     <!-- Chat -->
@@ -50,6 +54,9 @@
     <string name="btn_open_downloads">Downloads</string>
     <string name="no_app_for_file">No app found to open this file</string>
 
+    <!-- Device Discovery -->
+    <string name="no_devices_found">No devices found nearby.</string>
+
     <!-- Location sharing -->
     <string name="chat_share_location">Share Location</string>
     <string name="location_shared">Location</string>
@@ -70,5 +77,15 @@
     <string name="map_back_to_location">Back to Location</string>
 
     <!-- Permissions -->
-    <string name="permission_required">Some permissions were denied. Nearby discovery may not work correctly.</string>
+    <string name="permission_required">Some permissions were denied. App features may not work correctly.</string>
+
+    <!-- Voice messages (chat) -->
+    <string name="chat_hold_to_record">Hold to record</string>
+    <string name="chat_recording">Recording…</string>
+    <string name="chat_voice_message">🎙 Voice message</string>
+    <string name="chat_play_voice">▶ Play</string>
+    <string name="chat_mic_permission_required">Microphone permission is required to send voice messages</string>
+    <!-- Image preview (chat) -->
+    <string name="chat_image_preview">Image preview</string>
+    <string name="chat_tap_to_dismiss">Tap to dismiss</string>
 </resources>
