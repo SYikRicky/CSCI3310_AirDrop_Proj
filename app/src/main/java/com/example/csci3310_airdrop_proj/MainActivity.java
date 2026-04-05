@@ -36,6 +36,7 @@ import com.example.csci3310_airdrop_proj.ui.fragment.DeviceDiscoveryFragment;
 import com.example.csci3310_airdrop_proj.ui.fragment.ReceiveModeFragment;
 import com.example.csci3310_airdrop_proj.ui.MapActivity;
 import com.example.csci3310_airdrop_proj.ui.fragment.SendModeFragment;
+import com.example.csci3310_airdrop_proj.ui.fragment.WalkieTalkieFragment;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.util.ArrayList;
@@ -182,6 +183,9 @@ public class MainActivity extends AppCompatActivity
             } else if (id == R.id.nav_map) {
                 openMap();
                 return true;
+            } else if (id == R.id.nav_walkie_talkie) {
+                showWalkieTalkie();
+                return true;
             }
             return false;
         });
@@ -203,6 +207,15 @@ public class MainActivity extends AppCompatActivity
         getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         receiveModeFragment = new ReceiveModeFragment();
         replaceFragment(receiveModeFragment, "receive");
+    }
+
+    private void showWalkieTalkie() {
+        nearbyManager.stopDiscovery();
+        nearbyManager.stopAdvertising();
+        pendingFileUri  = null;
+        pendingFileMeta = null;
+        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        replaceFragment(new WalkieTalkieFragment(), WalkieTalkieFragment.TAG);
     }
 
     private void replaceFragment(Fragment fragment, String tag) {
