@@ -25,3 +25,6 @@ local.properties
 
 # Captures / profiling
 /captures
+
+# Claude Code local data
+.claude/

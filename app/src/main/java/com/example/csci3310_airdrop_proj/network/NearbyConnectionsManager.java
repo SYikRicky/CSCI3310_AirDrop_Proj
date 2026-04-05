@@ -1,7 +1,6 @@
 package com.example.csci3310_airdrop_proj.network;
 
 import android.content.Context;
-import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -9,12 +8,9 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
-import androidx.core.content.ContextCompat;
-
 import com.example.csci3310_airdrop_proj.model.DeviceInfo;
 import com.example.csci3310_airdrop_proj.model.FileMetadata;
 import com.example.csci3310_airdrop_proj.model.TransferProgress;
-import com.example.csci3310_airdrop_proj.service.FileTransferService;
 import com.google.android.gms.nearby.Nearby;
 import com.google.android.gms.nearby.connection.AdvertisingOptions;
 import com.google.android.gms.nearby.connection.ConnectionInfo;
@@ -29,13 +25,20 @@ import com.google.android.gms.nearby.connection.PayloadCallback;
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate;
 import com.google.android.gms.nearby.connection.Strategy;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Manages all Google Nearby Connections API operations:
@@ -43,7 +46,7 @@ import java.util.Set;
  * - Discovery (finding nearby devices)
  * - Connecting to a discovered device
  * - Sending a file (metadata bytes + file payload)
- * - Receiving a file (storing temp file → starting FileTransferService)
+ * - Receiving a file (copying Nearby temp file → app cache → FileProvider URI)
  *
  * Strategy: P2P_CLUSTER — supports many-to-many connections.
  * Both devices advertise AND discover simultaneously in Receive mode.
@@ -77,15 +80,34 @@ public class NearbyConnectionsManager {
     private boolean isAdvertising  = false;
     private boolean isDiscovering  = false;
 
-    // ── Send-side tracking: payloadId → metadata/PFD ────────────────────────
-    private final Map<Long, FileMetadata>       sendingFiles = new HashMap<>();
-    private final Map<Long, ParcelFileDescriptor> openPfds   = new HashMap<>();
+    // ── Send-side tracking: payloadId → metadata/PFD/temp-files ─────────────
+    private final Map<Long, FileMetadata>        sendingFiles   = new HashMap<>();
+    private final Map<Long, ParcelFileDescriptor> openPfds      = new HashMap<>();
+    private final Map<Long, File>                 sendTempFiles  = new HashMap<>();
 
     // ── Receive-side tracking ────────────────────────────────────────────────
     // endpointId → pending metadata (received as bytes payload before file payload arrives)
     private final Map<String, FileMetadata> pendingReceiveMeta     = new HashMap<>();
     // payloadId → Payload object (held until STATUS_SUCCESS)
     private final Map<Long, Payload>        pendingReceivePayloads = new HashMap<>();
+
+    // ── Chat file receive callback ────────────────────────────────────────────
+    /**
+     * Called on the main thread after a received chat file has been saved
+     * to the app's cache directory and a FileProvider URI created.
+     */
+    public interface ChatFileReceivedCallback {
+        void onChatFileReceived(Uri uri, FileMetadata meta);
+    }
+    private static ChatFileReceivedCallback sChatFileCallback;
+    public static void setChatFileCallback(ChatFileReceivedCallback cb) { sChatFileCallback = cb; }
+
+    /** Background executor for copying received files to cache. */
+    private final ExecutorService fileIoExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "nearby-file-io");
+        t.setDaemon(true);
+        return t;
+    });
 
     // ────────────────────────────────────────────────────────────────────────
 
@@ -166,14 +188,40 @@ public class NearbyConnectionsManager {
 
     /**
      * Request a P2P connection to a discovered endpoint.
-     * On success, {@link TransferEventBus.ConnectionListener#onConnectionEstablished} fires.
+     * If we are already connected to this endpoint, fires
+     * {@link TransferEventBus.ConnectionListener#onConnectionEstablished} immediately
+     * (avoids STATUS_ALREADY_CONNECTED_TO_ENDPOINT / error 8003).
      */
     public void connectToDevice(String endpointId) {
+        // Guard: already connected — reuse the live connection instead of requesting again.
+        if (connectedDevices.containsKey(endpointId)) {
+            Log.d(TAG, "Already connected to " + endpointId + " — reusing");
+            DeviceInfo existing = connectedDevices.get(endpointId);
+            notifyMain(() -> {
+                if (connectionListener != null) connectionListener.onConnectionEstablished(existing);
+            });
+            return;
+        }
+
         Log.d(TAG, "Requesting connection to: " + endpointId);
         outgoingConnectionRequests.add(endpointId);
         connectionsClient.requestConnection(localDeviceName, endpointId, connectionLifecycleCallback)
                 .addOnFailureListener(e -> {
                     Log.e(TAG, "Connect request failed: " + e.getMessage());
+                    // Fallback: if Nearby says already connected (race condition), reuse it.
+                    String msg = e.getMessage() != null ? e.getMessage() : "";
+                    if (msg.contains("STATUS_ALREADY_CONNECTED_TO_ENDPOINT")
+                            || msg.contains("8003")) {
+                        DeviceInfo existing = connectedDevices.get(endpointId);
+                        if (existing != null) {
+                            Log.d(TAG, "Race: already connected to " + endpointId + " — reusing");
+                            notifyMain(() -> {
+                                if (connectionListener != null)
+                                    connectionListener.onConnectionEstablished(existing);
+                            });
+                            return;
+                        }
+                    }
                     notifyMain(() -> {
                         if (connectionListener != null)
                             connectionListener.onConnectionFailed(e.getMessage());
@@ -260,45 +308,64 @@ public class NearbyConnectionsManager {
     }
 
     /**
-     * Send a file within a chat session. Same as sendFile but keeps the chat connection alive.
+     * Send a file within a chat session.
+     *
+     * FILE payloads ({@code Payload.fromFile}) are broken on API 36 / play-services-nearby 18.7.0
+     * (receiver's {@code asJavaFile()} returns null). Instead we read the entire file into memory
+     * and send it as a single BYTES payload with wire format:
+     * <pre>
+     *   "CHATFILE|senderName|fileName|mimeType|fileSize|"  +  raw file bytes
+     * </pre>
+     * BYTES payloads are proven to work (all CHAT| and LOCATION| messages use them).
+     * Max size per BYTES payload is ~32 MB; for chat images/voice this is plenty.
      */
     public void sendFileInChat(String endpointId, Uri fileUri, FileMetadata metadata) {
-        // Send metadata (already prefixed with FILE| by metadata.toBytes())
-        Payload metaPayload = Payload.fromBytes(metadata.toBytes());
-        connectionsClient.sendPayload(endpointId, metaPayload)
-                .addOnFailureListener(e -> Log.w(TAG, "Chat file meta failed: " + e.getMessage()));
+        fileIoExecutor.execute(() -> {
+            try {
+                // Read file content into byte array
+                byte[] fileBytes;
+                try (InputStream in = appContext.getContentResolver().openInputStream(fileUri)) {
+                    if (in == null) throw new IOException("openInputStream returned null");
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[64 * 1024];
+                    int read;
+                    while ((read = in.read(buf)) != -1) baos.write(buf, 0, read);
+                    fileBytes = baos.toByteArray();
+                }
 
-        try {
-            ParcelFileDescriptor pfd = appContext.getContentResolver().openFileDescriptor(fileUri, "r");
-            if (pfd == null) {
+                // Build header: "CHATFILE|senderName|fileName|mimeType|fileSize|"
+                String header = "CHATFILE|" + localDeviceName + "|"
+                        + metadata.getFileName() + "|"
+                        + metadata.getMimeType() + "|"
+                        + fileBytes.length + "|";
+                byte[] headerBytes = header.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+                // Combine header + raw file bytes into a single payload
+                byte[] combined = new byte[headerBytes.length + fileBytes.length];
+                System.arraycopy(headerBytes, 0, combined, 0, headerBytes.length);
+                System.arraycopy(fileBytes, 0, combined, headerBytes.length, fileBytes.length);
+
+                Payload payload = Payload.fromBytes(combined);
+                connectionsClient.sendPayload(endpointId, payload)
+                        .addOnFailureListener(e -> {
+                            Log.e(TAG, "sendFileInChat payload failed: " + e.getMessage());
+                            notifyMain(() -> {
+                                if (transferListener != null)
+                                    transferListener.onTransferFailed(
+                                            metadata.getFileName(), e.getMessage());
+                            });
+                        });
+                Log.d(TAG, "Sent chat file as BYTES: " + metadata.getFileName()
+                        + " (" + fileBytes.length + " bytes, header=" + headerBytes.length + ")");
+
+            } catch (Exception e) {
+                Log.e(TAG, "sendFileInChat failed for " + metadata.getFileName(), e);
                 notifyMain(() -> {
                     if (transferListener != null)
-                        transferListener.onTransferFailed(metadata.getFileName(), "Cannot open file");
+                        transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
                 });
-                return;
             }
-            Payload filePayload = Payload.fromFile(pfd);
-            long payloadId = filePayload.getId();
-            openPfds.put(payloadId, pfd);
-            sendingFiles.put(payloadId, metadata);
-
-            connectionsClient.sendPayload(endpointId, filePayload)
-                    .addOnFailureListener(e -> {
-                        closePfd(payloadId);
-                        sendingFiles.remove(payloadId);
-                        notifyMain(() -> {
-                            if (transferListener != null)
-                                transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
-                        });
-                    });
-            Log.d(TAG, "Sending chat file payload id=" + payloadId);
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to open URI for chat file send", e);
-            notifyMain(() -> {
-                if (transferListener != null)
-                    transferListener.onTransferFailed(metadata.getFileName(), e.getMessage());
-            });
-        }
+        });
     }
 
     /** Get a connected device by endpoint ID. */
@@ -370,9 +437,8 @@ public class NearbyConnectionsManager {
         @Override
         public void onConnectionResult(String endpointId, ConnectionResolution result) {
             if (result.getStatus().isSuccess()) {
-                DeviceInfo device = discoveredDevices.containsKey(endpointId)
-                        ? discoveredDevices.get(endpointId)
-                        : new DeviceInfo(endpointId, "Unknown Device");
+                DeviceInfo device = discoveredDevices.getOrDefault(
+                        endpointId, new DeviceInfo(endpointId, "Unknown Device"));
                 device.setConnected(true);
                 connectedDevices.put(endpointId, device);
                 Log.d(TAG, "Connected: " + endpointId);
@@ -407,58 +473,67 @@ public class NearbyConnectionsManager {
         public void onPayloadReceived(String endpointId, Payload payload) {
             if (payload.getType() == Payload.Type.BYTES) {
                 byte[] bytes = payload.asBytes();
-                if (bytes != null) {
-                    String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                if (bytes == null) return;
 
-                    if (raw.startsWith("CHAT|")) {
-                        // Chat text message: "CHAT|senderName|timestamp|text"
-                        String[] parts = raw.split("\\|", 4);
-                        if (parts.length == 4) {
-                            String senderName = parts[1];
-                            long parsedTime;
-                            try { parsedTime = Long.parseLong(parts[2]); }
-                            catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
-                            final long timestamp = parsedTime;
-                            String text = parts[3];
-                            notifyMain(() -> {
-                                if (chatListener != null)
-                                    chatListener.onChatMessageReceived(endpointId, senderName, text, timestamp);
-                            });
-                        }
-                    } else if (raw.startsWith("LOCATION|")) {
-                        // GPS location: "LOCATION|senderName|timestamp|lat|lng"
-                        String[] parts = raw.split("\\|", 5);
-                        if (parts.length == 5) {
-                            String senderName = parts[1];
-                            long parsedTime;
-                            try { parsedTime = Long.parseLong(parts[2]); }
-                            catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
-                            final long timestamp = parsedTime;
-                            try {
-                                final double lat = Double.parseDouble(parts[3]);
-                                final double lng = Double.parseDouble(parts[4]);
-                                notifyMain(() -> {
-                                    if (chatListener != null)
-                                        chatListener.onLocationMessageReceived(
-                                                endpointId, senderName, lat, lng, timestamp);
-                                });
-                            } catch (NumberFormatException e) {
-                                Log.w(TAG, "Invalid location payload: " + raw);
-                            }
-                        }
-                    } else {
-                        // File metadata: "FILE|fileName|mimeType|fileSize" or legacy "fileName|mimeType|fileSize"
-                        FileMetadata meta = FileMetadata.fromBytes(bytes);
-                        pendingReceiveMeta.put(endpointId, meta);
-                        Log.d(TAG, "Received metadata: " + meta);
+                // ── CHATFILE| — inline file sent as bytes (images, voice, etc.) ──
+                // Wire format: "CHATFILE|senderName|fileName|mimeType|fileSize|" + raw bytes
+                // We check the first 9 bytes to avoid converting the entire (possibly large)
+                // byte array to a String.
+                if (bytes.length > 9 && startsWith(bytes, "CHATFILE|")) {
+                    handleChatFileBytes(endpointId, bytes);
+                    return;
+                }
 
-                        DeviceInfo sender = connectedDevices.get(endpointId);
-                        String senderName = sender != null ? sender.getDeviceName() : endpointId;
+                String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+
+                if (raw.startsWith("CHAT|")) {
+                    // Chat text message: "CHAT|senderName|timestamp|text"
+                    String[] parts = raw.split("\\|", 4);
+                    if (parts.length == 4) {
+                        String senderName = parts[1];
+                        long parsedTime;
+                        try { parsedTime = Long.parseLong(parts[2]); }
+                        catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
+                        final long timestamp = parsedTime;
+                        String text = parts[3];
                         notifyMain(() -> {
-                            if (transferListener != null)
-                                transferListener.onIncomingFile(meta, senderName);
+                            if (chatListener != null)
+                                chatListener.onChatMessageReceived(endpointId, senderName, text, timestamp);
                         });
                     }
+                } else if (raw.startsWith("LOCATION|")) {
+                    // GPS location: "LOCATION|senderName|timestamp|lat|lng"
+                    String[] parts = raw.split("\\|", 5);
+                    if (parts.length == 5) {
+                        String senderName = parts[1];
+                        long parsedTime;
+                        try { parsedTime = Long.parseLong(parts[2]); }
+                        catch (NumberFormatException e) { parsedTime = System.currentTimeMillis(); }
+                        final long timestamp = parsedTime;
+                        try {
+                            final double lat = Double.parseDouble(parts[3]);
+                            final double lng = Double.parseDouble(parts[4]);
+                            notifyMain(() -> {
+                                if (chatListener != null)
+                                    chatListener.onLocationMessageReceived(
+                                            endpointId, senderName, lat, lng, timestamp);
+                            });
+                        } catch (NumberFormatException e) {
+                            Log.w(TAG, "Invalid location payload: " + raw);
+                        }
+                    }
+                } else {
+                    // File metadata: "FILE|fileName|mimeType|fileSize" or legacy "fileName|mimeType|fileSize"
+                    FileMetadata meta = FileMetadata.fromBytes(bytes);
+                    pendingReceiveMeta.put(endpointId, meta);
+                    Log.d(TAG, "Received metadata: " + meta);
+
+                    DeviceInfo sender = connectedDevices.get(endpointId);
+                    String senderName = sender != null ? sender.getDeviceName() : endpointId;
+                    notifyMain(() -> {
+                        if (transferListener != null)
+                            transferListener.onIncomingFile(meta, senderName);
+                    });
                 }
 
             } else if (payload.getType() == Payload.Type.FILE) {
@@ -488,6 +563,8 @@ public class NearbyConnectionsManager {
                 } else if (status == PayloadTransferUpdate.Status.SUCCESS) {
                     closePfd(payloadId);
                     sendingFiles.remove(payloadId);
+                    File tmp = sendTempFiles.remove(payloadId);
+                    if (tmp != null) tmp.delete();
                     TransferProgress p = buildProgress(meta.getFileName(), meta.getFileSize(), true);
                     p.setBytesTransferred(meta.getFileSize());
                     p.setStatus(TransferProgress.Status.DONE);
@@ -498,6 +575,8 @@ public class NearbyConnectionsManager {
                 } else { // FAILURE or CANCELED
                     closePfd(payloadId);
                     sendingFiles.remove(payloadId);
+                    File tmp = sendTempFiles.remove(payloadId);
+                    if (tmp != null) tmp.delete();
                     notifyMain(() -> {
                         if (transferListener != null)
                             transferListener.onTransferFailed(meta.getFileName(), "Send failed");
@@ -524,15 +603,55 @@ public class NearbyConnectionsManager {
                     Payload received = pendingReceivePayloads.remove(payloadId);
                     pendingReceiveMeta.remove(endpointId);
 
-                    // Get the temp file Nearby wrote for us and hand off to FileTransferService
-                    java.io.File tempFile = (received.asFile() != null)
-                            ? received.asFile().asJavaFile() : null;
-                    if (tempFile != null && meta != null) {
-                        Intent intent = new Intent(appContext, FileTransferService.class);
-                        intent.putExtra(FileTransferService.EXTRA_FILE_METADATA, meta);
-                        intent.putExtra(FileTransferService.EXTRA_TEMP_FILE_PATH, tempFile.getAbsolutePath());
-                        ContextCompat.startForegroundService(appContext, intent);
-                        Log.d(TAG, "Started FileTransferService for: " + meta.getFileName());
+                    // ── Save received file and update the chat message ─────────
+                    // Nearby stores the temp file in the app's cache directory.
+                    // We move it to our own subfolder so we control its lifetime,
+                    // then notify the UI so it can show the Play / preview button.
+                    File tempFile = null;
+                    try {
+                        if (received != null && received.asFile() != null) {
+                            tempFile = received.asFile().asJavaFile();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "asJavaFile() failed", e);
+                    }
+
+                    if (tempFile != null && tempFile.exists() && meta != null) {
+                        final FileMetadata finalMeta = meta;
+                        final File srcFile = tempFile;
+
+                        fileIoExecutor.execute(() -> {
+                            try {
+                                // Move (rename) into our cache dir; fall back to copy
+                                File cacheDir = new File(appContext.getCacheDir(), "chat_received");
+                                //noinspection ResultOfMethodCallIgnored
+                                cacheDir.mkdirs();
+                                File dest = uniqueFile(cacheDir, finalMeta.getFileName());
+
+                                if (!srcFile.renameTo(dest)) {
+                                    copyFile(srcFile, dest);
+                                    //noinspection ResultOfMethodCallIgnored
+                                    srcFile.delete();
+                                }
+
+                                // Use Uri.fromFile — the file is in our own app storage,
+                                // and we only use it within our own ImageView / MediaPlayer.
+                                Uri fileUri = Uri.fromFile(dest);
+                                Log.d(TAG, "Chat file ready: " + fileUri);
+                                notifyMain(() -> {
+                                    if (sChatFileCallback != null)
+                                        sChatFileCallback.onChatFileReceived(fileUri, finalMeta);
+                                });
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to save received file: "
+                                        + finalMeta.getFileName(), e);
+                                // Don't delete srcFile on failure — keep the data
+                            }
+                        });
+                    } else {
+                        Log.w(TAG, "Received payload but no temp file: "
+                                + "received=" + received + " tempFile=" + tempFile
+                                + " meta=" + meta);
                     }
 
                     TransferProgress p = buildProgress(fileName, fileSize, false);
@@ -552,6 +671,98 @@ public class NearbyConnectionsManager {
             }
         }
     };
+
+    // ── CHATFILE handler ────────────────────────────────────────────────────
+
+    /**
+     * Handle a "CHATFILE|senderName|fileName|mimeType|fileSize|" + raw-bytes payload.
+     * Parses the text header (everything before the 5th pipe), extracts the raw file
+     * bytes, saves them to {@code chat_received/} on a background thread, then
+     * notifies both the TransferListener (so the chat bubble appears) and the
+     * ChatFileReceivedCallback (so the bubble gets its savedUri for preview/play).
+     */
+    private void handleChatFileBytes(String endpointId, byte[] bytes) {
+        // Find the 5th pipe — everything before it is the text header,
+        // everything after is raw file data.
+        int pipeCount = 0;
+        int headerEnd = -1;
+        for (int i = 0; i < bytes.length; i++) {
+            if (bytes[i] == '|') {
+                pipeCount++;
+                if (pipeCount == 5) {
+                    headerEnd = i + 1; // first byte of file data
+                    break;
+                }
+            }
+        }
+        if (headerEnd < 0) {
+            Log.w(TAG, "Malformed CHATFILE payload — could not find 5 pipes");
+            return;
+        }
+
+        String header = new String(bytes, 0, headerEnd, java.nio.charset.StandardCharsets.UTF_8);
+        // header = "CHATFILE|senderName|fileName|mimeType|fileSize|"
+        String[] parts = header.split("\\|", 6); // [CHATFILE, sender, fileName, mime, size, ""]
+        if (parts.length < 5) {
+            Log.w(TAG, "Malformed CHATFILE header: " + header);
+            return;
+        }
+
+        final String senderName = parts[1];
+        final String fileName   = parts[2];
+        final String mimeType   = parts[3];
+        long parsedSize;
+        try { parsedSize = Long.parseLong(parts[4]); }
+        catch (NumberFormatException e) { parsedSize = bytes.length - headerEnd; }
+        final long fileSize = parsedSize;
+
+        final int dataOffset = headerEnd;
+        final int dataLength = bytes.length - headerEnd;
+
+        Log.d(TAG, "CHATFILE received: " + fileName + " (" + dataLength + " bytes)"
+                + " mime=" + mimeType + " from=" + senderName);
+
+        final FileMetadata meta = new FileMetadata(fileName, mimeType, fileSize);
+
+        // 1) Notify UI about the incoming file (creates the chat bubble with emoji label)
+        notifyMain(() -> {
+            if (transferListener != null) transferListener.onIncomingFile(meta, senderName);
+        });
+
+        // 2) Save file bytes to disk in background, then notify UI with the savedUri
+        fileIoExecutor.execute(() -> {
+            try {
+                File cacheDir = new File(appContext.getCacheDir(), "chat_received");
+                //noinspection ResultOfMethodCallIgnored
+                cacheDir.mkdirs();
+                File dest = uniqueFile(cacheDir, fileName);
+
+                try (OutputStream out = new FileOutputStream(dest)) {
+                    out.write(bytes, dataOffset, dataLength);
+                }
+
+                Uri fileUri = Uri.fromFile(dest);
+                Log.d(TAG, "CHATFILE saved: " + fileUri + " (" + dest.length() + " bytes)");
+
+                notifyMain(() -> {
+                    if (sChatFileCallback != null)
+                        sChatFileCallback.onChatFileReceived(fileUri, meta);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to save CHATFILE: " + fileName, e);
+            }
+        });
+    }
+
+    /** Fast prefix check on raw bytes without converting the whole array to String. */
+    private static boolean startsWith(byte[] data, String prefix) {
+        byte[] prefixBytes = prefix.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (data.length < prefixBytes.length) return false;
+        for (int i = 0; i < prefixBytes.length; i++) {
+            if (data[i] != prefixBytes[i]) return false;
+        }
+        return true;
+    }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -574,5 +785,29 @@ public class NearbyConnectionsManager {
         } else {
             mainHandler.post(r);
         }
+    }
+
+    private static void copyFile(File src, File dst) throws IOException {
+        try (InputStream in  = new FileInputStream(src);
+             OutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buf)) != -1) out.write(buf, 0, read);
+        }
+    }
+
+    /** Return a File with the given name in dir, appending _1, _2… if it already exists. */
+    private static File uniqueFile(File dir, String name) {
+        File f = new File(dir, name);
+        if (!f.exists()) return f;
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext  = dot > 0 ? name.substring(dot)    : "";
+        int i = 1;
+        while (f.exists()) {
+            f = new File(dir, stem + "_" + i + ext);
+            i++;
+        }
+        return f;
     }
 }

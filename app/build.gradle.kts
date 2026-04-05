@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.fragment)
     implementation(libs.lifecycle.service)
+    implementation(libs.nearby.connections)
     implementation(libs.play.services.location)
     implementation(libs.osmdroid)
 

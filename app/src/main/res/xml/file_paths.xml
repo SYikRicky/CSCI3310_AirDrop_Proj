@@ -2,4 +2,6 @@
 <paths>
     <!-- Public external Downloads directory (used on API 24–28) -->
     <external-path name="external_downloads" path="." />
+    <!-- App internal cache — used for temporary voice message recordings -->
+    <cache-path name="voice_cache" path="." />
 </paths>

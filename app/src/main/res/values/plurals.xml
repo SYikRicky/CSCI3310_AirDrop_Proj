@@ -1,7 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <plurals name="wt_users_in_channel">
-        <item quantity="one">%d user in channel</item>
-        <item quantity="other">%d users in channel</item>
-    </plurals>
 </resources>
