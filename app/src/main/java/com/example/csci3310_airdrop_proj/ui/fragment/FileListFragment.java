@@ -17,6 +17,7 @@ import com.example.csci3310_airdrop_proj.MainActivity;
 import com.example.csci3310_airdrop_proj.R;
 import com.example.csci3310_airdrop_proj.model.SharedFile;
 import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
+import com.example.csci3310_airdrop_proj.service.UploadQueue;
 import com.example.csci3310_airdrop_proj.ui.adapter.FileListAdapter;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
@@ -40,6 +41,7 @@ public class FileListFragment extends Fragment {
     private FileListAdapter adapter;
     private TextView        tvEmpty;
     private SharedDriveRepository.Registration driveSubscription; // remove in onDestroyView
+    private UploadQueue.Listener uploadQueueListener;
 
     // ── Fragment lifecycle ────────────────────────────────────────────────────
 
@@ -90,7 +92,7 @@ public class FileListFragment extends Fragment {
                     @Override
                     public void onFilesChanged(List<SharedFile> files) {
                         adapter.updateFiles(files);
-                        tvEmpty.setVisibility(files.isEmpty() ? View.VISIBLE : View.GONE);
+                        refreshEmptyState(files.isEmpty());
                     }
 
                     @Override
@@ -99,6 +101,15 @@ public class FileListFragment extends Fragment {
                         tvEmpty.setText(R.string.drive_load_error);
                     }
                 });
+
+        // Pending uploads from FileUploadService — subscribe so rows appear
+        // at the top of the list for in-flight uploads.
+        uploadQueueListener = uploads -> {
+            adapter.updatePending(uploads);
+            boolean nothingToShow = uploads.isEmpty() && adapter.getItemCount() == 0;
+            refreshEmptyState(nothingToShow);
+        };
+        UploadQueue.get().addListener(uploadQueueListener);
     }
 
     @Override
@@ -109,6 +120,14 @@ public class FileListFragment extends Fragment {
             driveSubscription.remove();
             driveSubscription = null;
         }
+        if (uploadQueueListener != null) {
+            UploadQueue.get().removeListener(uploadQueueListener);
+            uploadQueueListener = null;
+        }
+    }
+
+    private void refreshEmptyState(boolean isEmpty) {
+        tvEmpty.setVisibility(isEmpty ? View.VISIBLE : View.GONE);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

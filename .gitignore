@@ -28,3 +28,6 @@ local.properties
 
 # Claude Code local data
 .claude/
+create_diagrams.py
+create_report.js
+DroidDrop_Phase2_Report.docx

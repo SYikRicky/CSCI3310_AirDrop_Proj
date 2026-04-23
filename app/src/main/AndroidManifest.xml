@@ -109,6 +109,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Foreground service: uploads to the Shared Drive in the background -->
+        <service
+            android:name=".service.FileUploadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- FileProvider for sharing saved files with viewer apps (API 24+) -->
         <provider
             android:name="androidx.core.content.FileProvider"
