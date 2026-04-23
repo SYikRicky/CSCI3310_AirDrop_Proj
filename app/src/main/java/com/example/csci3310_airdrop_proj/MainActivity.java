@@ -31,6 +31,8 @@ import com.example.csci3310_airdrop_proj.network.NearbyConnectionsManager;
 import com.example.csci3310_airdrop_proj.repository.FirebaseSharedDriveRepository;
 import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
 import com.example.csci3310_airdrop_proj.service.FileTransferService;
+import com.example.csci3310_airdrop_proj.service.FileUploadService;
+import com.example.csci3310_airdrop_proj.service.UploadQueue;
 import com.example.csci3310_airdrop_proj.storage.ChatHistoryRepository;
 import com.example.csci3310_airdrop_proj.storage.SharedPrefsChatHistoryRepository;
 import com.example.csci3310_airdrop_proj.ui.MapActivity;
@@ -378,38 +380,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void uploadFile(Uri uri, String fileName, String mimeType, long fileSize) {
-        repository.uploadFile(uri, fileName, mimeType, fileSize,
-                getContentResolver(),
-                new SharedDriveRepository.UploadCallback() {
-                    @Override public void onProgress(int percent) {
-                        runOnUiThread(() -> {
-                            if (sendModeFragment != null && sendModeFragment.isAdded())
-                                sendModeFragment.onUploadProgress(percent);
-                        });
-                    }
-                    @Override public void onSuccess(SharedFile file) {
-                        runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this,
-                                    "Uploaded: " + file.getFileName(),
-                                    Toast.LENGTH_SHORT).show();
-                            sendModeFragment = null;
-                            getSupportFragmentManager()
-                                    .beginTransaction()
-                                    .replace(R.id.fragment_container,
-                                            new FileListFragment(), FileListFragment.TAG)
-                                    .commitAllowingStateLoss();
-                        });
-                    }
-                    @Override public void onFailure(Exception e) {
-                        runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this,
-                                    "Upload failed: " + e.getMessage(),
-                                    Toast.LENGTH_SHORT).show();
-                            if (sendModeFragment != null && sendModeFragment.isAdded())
-                                sendModeFragment.onUploadFailure(e.getMessage());
-                        });
-                    }
-                });
+        // Register the upload so a pending row appears in the Drive list
+        // immediately — before the Firestore document is created.
+        String queueId = UploadQueue.get().enqueue(fileName, mimeType, fileSize);
+
+        // Delegate the actual upload to FileUploadService so it survives
+        // navigation and app-foreground changes.
+        Intent svc = new Intent(this, FileUploadService.class);
+        svc.putExtra(FileUploadService.EXTRA_URI, uri);
+        svc.putExtra(FileUploadService.EXTRA_FILE_NAME, fileName);
+        svc.putExtra(FileUploadService.EXTRA_MIME_TYPE, mimeType);
+        svc.putExtra(FileUploadService.EXTRA_FILE_SIZE, fileSize);
+        svc.putExtra(FileUploadService.EXTRA_QUEUE_ID, queueId);
+        ContextCompat.startForegroundService(this, svc);
+
+        // Return to the Drive list. The pending row is already in place; the
+        // Firestore snapshot listener replaces it with the real row on success.
+        sendModeFragment = null;
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.fragment_container,
+                        new FileListFragment(), FileListFragment.TAG)
+                .commitAllowingStateLoss();
     }
 
     public void previewFile(SharedFile file) {
