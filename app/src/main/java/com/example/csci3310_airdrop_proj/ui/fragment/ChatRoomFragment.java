@@ -33,6 +33,7 @@ import com.example.csci3310_airdrop_proj.MainActivity;
 import com.example.csci3310_airdrop_proj.R;
 import com.example.csci3310_airdrop_proj.model.ChatMessage;
 import com.example.csci3310_airdrop_proj.model.FileMetadata;
+import com.example.csci3310_airdrop_proj.playback.VoicePlaybackController;
 import com.example.csci3310_airdrop_proj.ui.adapter.ChatAdapter;
 
 import java.io.File;
@@ -51,7 +52,8 @@ public class ChatRoomFragment extends Fragment {
     private String endpointId;
     private String deviceName;
 
-    private ChatAdapter adapter;
+    private ChatAdapter             adapter;
+    private VoicePlaybackController voicePlayback;
     private RecyclerView rvMessages;
     private EditText etMessage;
     private TextView tvConnectionStatus;
@@ -134,7 +136,8 @@ public class ChatRoomFragment extends Fragment {
         lm.setStackFromEnd(true);
         rvMessages.setLayoutManager(lm);
 
-        adapter = new ChatAdapter();
+        voicePlayback = new VoicePlaybackController();
+        adapter = new ChatAdapter(voicePlayback);
         rvMessages.setAdapter(adapter);
 
         // Send text message
@@ -176,6 +179,12 @@ public class ChatRoomFragment extends Fragment {
         super.onDestroyView();
         // Release recorder if fragment is destroyed mid-recording (e.g. back-press)
         releaseRecorder();
+        // Release any active voice-message MediaPlayer — the adapter's
+        // view holders will be garbage-collected, but the player lives past them.
+        if (voicePlayback != null) {
+            voicePlayback.release();
+            voicePlayback = null;
+        }
     }
 
     // ── Voice recording ───────────────────────────────────────────────────────

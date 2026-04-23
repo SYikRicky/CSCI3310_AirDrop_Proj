@@ -16,9 +16,9 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.csci3310_airdrop_proj.MainActivity;
 import com.example.csci3310_airdrop_proj.R;
 import com.example.csci3310_airdrop_proj.model.SharedFile;
+import com.example.csci3310_airdrop_proj.repository.SharedDriveRepository;
 import com.example.csci3310_airdrop_proj.ui.adapter.FileListAdapter;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
-import com.google.firebase.firestore.ListenerRegistration;
 
 import java.util.List;
 
@@ -37,9 +37,9 @@ public class FileListFragment extends Fragment {
 
     public static final String TAG = "FileListFrag";
 
-    private FileListAdapter      adapter;
-    private TextView             tvEmpty;
-    private ListenerRegistration firestoreListener;  // Must be removed in onDestroyView
+    private FileListAdapter adapter;
+    private TextView        tvEmpty;
+    private SharedDriveRepository.Registration driveSubscription; // remove in onDestroyView
 
     // ── Fragment lifecycle ────────────────────────────────────────────────────
 
@@ -84,9 +84,9 @@ public class FileListFragment extends Fragment {
         fab.setOnClickListener(v -> ((MainActivity) requireActivity()).openFilePicker());
 
         // Start listening to Firestore — real-time updates
-        firestoreListener = ((MainActivity) requireActivity())
+        driveSubscription = ((MainActivity) requireActivity())
                 .getRepository()
-                .listenToFiles(new com.example.csci3310_airdrop_proj.repository.SharedDriveRepository.FilesListener() {
+                .listenToFiles(new SharedDriveRepository.FilesListener() {
                     @Override
                     public void onFilesChanged(List<SharedFile> files) {
                         adapter.updateFiles(files);
@@ -104,10 +104,10 @@ public class FileListFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        // Critical: remove Firestore listener to prevent memory/resource leak
-        if (firestoreListener != null) {
-            firestoreListener.remove();
-            firestoreListener = null;
+        // Critical: cancel the subscription to prevent memory/resource leak
+        if (driveSubscription != null) {
+            driveSubscription.remove();
+            driveSubscription = null;
         }
     }
 
