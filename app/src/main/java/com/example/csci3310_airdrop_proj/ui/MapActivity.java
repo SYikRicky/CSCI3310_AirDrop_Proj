@@ -8,6 +8,9 @@ import android.util.Log;
 import android.view.View;
 import android.widget.ImageButton;
 import android.widget.Toast;
+import android.content.Intent;
+import android.net.Uri;
+import android.content.ActivityNotFoundException;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -132,6 +135,28 @@ public class MapActivity extends AppCompatActivity {
             btnToggleRoute.setOnClickListener(v -> toggleRoute());
             btnBackToLocation.setVisibility(View.VISIBLE);
             btnBackToLocation.setOnClickListener(v -> goToSharedLocationAndZoom());
+
+            MaterialButton btnOpenGoogleMaps = findViewById(R.id.btn_open_google_maps);
+            btnOpenGoogleMaps.setVisibility(View.VISIBLE);
+            btnOpenGoogleMaps.setOnClickListener(v -> {
+                String uriStr = "geo:0,0?q=" + lat + "," + lng;
+                if (label != null && !label.isEmpty()) {
+                    uriStr += "(" + Uri.encode(label) + ")";
+                }
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uriStr));
+                intent.setPackage("com.google.android.apps.maps");
+                try {
+                    startActivity(intent);
+                } catch (ActivityNotFoundException e) {
+                    // Fallback to any app that can handle geo intents
+                    Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(uriStr));
+                    try {
+                        startActivity(fallbackIntent);
+                    } catch (ActivityNotFoundException ex) {
+                        Toast.makeText(this, "No maps app found", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
         } else {
             goToMyLocationAndZoom();
         }

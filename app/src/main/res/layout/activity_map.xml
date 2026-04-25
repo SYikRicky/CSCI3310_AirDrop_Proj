@@ -98,6 +98,20 @@
             android:visibility="gone"
             app:cornerRadius="8dp" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_open_google_maps"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:minHeight="48dp"
+            android:text="@string/map_open_google_maps"
+            android:textSize="11sp"
+            android:maxLines="2"
+            android:visibility="gone"
+            app:cornerRadius="8dp" />
+
     </LinearLayout>
 
 </LinearLayout>

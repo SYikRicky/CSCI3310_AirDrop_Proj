@@ -75,6 +75,7 @@
     <string name="map_fetching_route">Loading walking route…</string>
     <string name="map_where_am_i">Where am I</string>
     <string name="map_back_to_location">Back to Location</string>
+    <string name="map_open_google_maps">Google Maps</string>
 
     <!-- Permissions -->
     <string name="permission_required">Some permissions were denied. App features may not work correctly.</string>
