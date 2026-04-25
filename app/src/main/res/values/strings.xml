@@ -15,6 +15,11 @@
     <string name="saving_metadata">Saving to drive…</string>
     <string name="upload_success">Upload complete!</string>
     <string name="upload_failed">Upload failed</string>
+    <string name="upload_max_size_hint">Maximum upload size: %1$s</string>
+    <string name="upload_too_large">File is too large. Maximum upload size is %1$s.</string>
+    <string name="upload_large_title">Large file</string>
+    <string name="upload_large_message">This file is %1$s. The upload may take a while depending on your network. Continue?</string>
+    <string name="upload_large_continue">Upload</string>
 
     <!-- Receive mode (kept for future use) -->
     <string name="start_receiving">Start Receiving</string>

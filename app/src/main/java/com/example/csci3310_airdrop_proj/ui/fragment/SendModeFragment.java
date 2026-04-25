@@ -6,6 +6,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.text.format.Formatter;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -78,11 +79,16 @@ public class SendModeFragment extends Fragment {
         progressBar    = view.findViewById(R.id.progress_upload);
         tvStatus       = view.findViewById(R.id.tv_upload_status);
         Button btnPick = view.findViewById(R.id.btn_pick_file);
+        TextView tvMaxSize = view.findViewById(R.id.tv_max_size_hint);
 
         btnUpload.setText(R.string.btn_upload);
         btnUpload.setEnabled(false);
         progressBar.setVisibility(View.GONE);
         tvStatus.setVisibility(View.GONE);
+
+        tvMaxSize.setText(getString(R.string.upload_max_size_hint,
+                Formatter.formatShortFileSize(requireContext(),
+                        MainActivity.MAX_UPLOAD_SIZE_BYTES)));
 
         btnPick.setOnClickListener(v -> openFilePicker());
         btnUpload.setOnClickListener(v -> startUpload());

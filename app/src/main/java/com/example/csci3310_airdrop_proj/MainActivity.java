@@ -1,12 +1,14 @@
 package com.example.csci3310_airdrop_proj;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.format.Formatter;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -64,6 +66,11 @@ import java.util.Random;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+
+    /** Hard cap. Files larger than this are rejected before reaching Firebase. */
+    public static final long MAX_UPLOAD_SIZE_BYTES  = 25L * 1024 * 1024; // 25 MB
+    /** Soft warning. Files between this and the cap prompt the user to confirm. */
+    public static final long WARN_UPLOAD_SIZE_BYTES = 10L * 1024 * 1024; // 10 MB
 
     // ── Infrastructure ───────────────────────────────────────────────────────
     private NearbyConnectionsManager    nearbyManager;
@@ -380,6 +387,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void uploadFile(Uri uri, String fileName, String mimeType, long fileSize) {
+        if (fileSize > MAX_UPLOAD_SIZE_BYTES) {
+            Toast.makeText(this,
+                    getString(R.string.upload_too_large,
+                            Formatter.formatShortFileSize(this, MAX_UPLOAD_SIZE_BYTES)),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (fileSize > WARN_UPLOAD_SIZE_BYTES) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.upload_large_title)
+                    .setMessage(getString(R.string.upload_large_message,
+                            Formatter.formatShortFileSize(this, fileSize)))
+                    .setPositiveButton(R.string.upload_large_continue,
+                            (d, w) -> startUpload(uri, fileName, mimeType, fileSize))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+        startUpload(uri, fileName, mimeType, fileSize);
+    }
+
+    private void startUpload(Uri uri, String fileName, String mimeType, long fileSize) {
         // Register the upload so a pending row appears in the Drive list
         // immediately — before the Firestore document is created.
         String queueId = UploadQueue.get().enqueue(fileName, mimeType, fileSize);
