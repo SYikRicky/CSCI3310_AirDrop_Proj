@@ -21,6 +21,14 @@
         android:text="Pick a file — it will be visible to everyone in the shared drive"
         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
         android:textColor="?android:attr/textColorSecondary"
+        android:layout_marginBottom="6dp" />
+
+    <TextView
+        android:id="@+id/tv_max_size_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+        android:textColor="?colorPrimary"
         android:layout_marginBottom="28dp" />
 
     <!-- Selected file preview -->
